@@ -1,0 +1,402 @@
+# 🧠 Telegram Among Us Bot (Core + Full Feature Set)
+
+Build a Telegram group game bot inspired by Among Us. The bot supports 4–20 players per match, using inline button and DM commands to perform actions. Games occur in group chats (ranked/unranked), and all gameplay is driven via **DM for private interactions**.
+
+The bot must use the following stack:
+
+* `python-telegram-bot v20+`
+* `asyncio`
+* `asyncpg` for PostgreSQL
+* `dotenv`
+* `pydantic`
+* `structlog` for structured logging
+
+---
+
+## 🧩 Game Structure Summary
+
+### ✅ Game Modes
+
+* Ranked Mode:
+
+  * Allowed only in groups listed via `.env` (`RANKED_GC_IDS`)
+  * Defaults to ranked if no parameter passed in these groups
+  * `/startgame unranked` can override
+
+* Unranked Mode:
+
+  * Default for all other groups
+  * Ranked cannot be started in unlisted groups
+
+---
+
+## 📦 Basic Commands
+
+| Command     | Scope    | Description                                                                      |
+| ----------- | -------- | -------------------------------------------------------------------------------- |
+| `/start`    | Anywhere | Registers player with bot                                                        |
+| `/help`     | DM only  | Help guide. If used in group, bot replies with redirect to DM and passes command |
+| `/info`     | DM only  | Game info. Same redirect logic as `/help`                                        |
+| `/ping`     | Anywhere | Checks bot responsiveness                                                        |
+| `/about`    | DM only  | Bot/repo/dev info. Same redirect logic as /help                                  |
+| `/report`   | DM only  | Report a bug. Same redirect logic as /help                                       |
+| `/feedback` | DM only  | Send suggestions. Same redirect logic as /help                                   |
+| `/roles`    | DM only  | List of roles. Same redirect logic as /help                                      |
+| `/rules`    | DM only  | Game rule summary. Same redirect logic as /help                                  |
+
+* Command Prefix Flexibility: All commands can be triggered with `/`, `!`, `?`, `.`
+
+---
+
+## 🔐 Admin & Owner Commands
+
+| Command                      | Who Can Use                 | Description                                               |
+| ---------------------------- | --------------------------- | --------------------------------------------------------- |
+| `/xban <user_id> <duration>` | Bot Owner only              | Bans user from ranked games for a duration or permanently |
+| `/xunban <user_id>`          | Bot Owner only              | Unbans user                                               |
+| `/setxp <user_id> <amount>`  | Bot Owner only              | Adjusts user XP                                           |
+| `/end`                       | Group admin or game creator | Force-ends an ongoing game in that group                  |
+
+> Ban durations: h, d, m, `perma` (hours, days, months, permanent)
+
+---
+
+## 🧠 Game Flow
+
+### 🔁 Phases
+
+1. Lobby Phase (starts after `/startgame`, 60s)
+2. Night Phase (60s)
+3. Day Phase (90s discussion + 30s voting)
+4. Back to Night (until win/lose)
+
+---
+
+## 🔷 Lobby Phase
+
+* `/startgame` creates a new lobby in a group (if one isn’t already active)
+* Players use `/join` to join
+* Bot sends a confirmation message in dm of joined player and updates the player list in same message in that group
+* Players must have initiated a DM with bot to participate (due to Telegram restrictions)
+* Lobby Message: shows updated player list in group as inline message
+* 60-second timeout
+
+  * If 4+ players join: game starts automatically
+  * If <4: game cancels
+
+    * Quiet message in group, DMs to joined players
+* `/begin`: game creator can force start early if players >= 4
+* `/end`: ends lobby/game manually
+
+---
+
+## 🎭 Role Assignment (Randomized)
+
+Based on total players:
+
+| Player Count | Roles                                                            |
+| ------------ | ---------------------------------------------------------------- |
+| 4–8          | 1 Impostor, 1 Detective, rest Crewmates                          |
+| 9–12         | 2 Impostors, 1 Detective, rest Crewmates                         |
+| 13–16        | 3 Impostors, 2 Detectives, 1 Sheriff, 1 Engineer, rest Crewmates |
+| 17–20        | 4 Impostors, 2 Detectives, 1 Sheriff, 1 Engineer, rest Crewmates |
+
+* Roles are secret and sent via DM
+* Impostors (if ≥2) and detectives (if 2) know each other and can chat via bot’s DM channel
+* 5s delay, then Night Phase begins
+
+---
+
+## 🌙 Night Phase (60 Seconds)
+
+* Bot announces in group: “🌙 Night phase has started! Go to DM to perform your actions.” (inline button link)
+* Every role acts in DM
+* After 60s:
+
+  * All actions are evaluated
+  * Players who didn’t act are counted as AFK
+
+### 🛠 Actions Per Role
+
+| Role      | Action                                           |
+| --------- | ------------------------------------------------ |
+| Crewmate  | Completes tasks (from predefined task pool)      |
+| Impostor  | Votes on kill target (or solo kill if 1 imp)     |
+| Detective | Investigates player (see conditions below)       |
+| Sheriff   | Kills a player (see conditions below)            |
+| Engineer  | Gets a prompt if the previous round failed tasks |
+
+#### Crewmate Task Distribution
+
+| Players | Tasks Given To    |
+| ------- | ----------------- |
+| 4–8     | 1 random crewmate |
+| 9–12    | 2                 |
+| 13–16   | 3                 |
+| 17–20   | 4                 |
+
+> If even 1 assigned crewmate fails → round is marked incomplete
+
+#### Impostor Logic
+
+* Solo impostor: selects target and kills
+* 2+ impostors: vote in DM, can chat
+
+  * Most-voted player dies
+  * Ties/no vote → no one dies
+* If impostors reduce to 1 → DM chat is closed
+
+#### Sheriff Logic
+
+ * Can shoot one player per game (if not used in one night phase if can be used in next night phase)
+ * If target is an imposter
+    
+   * Imposter dies, sheriff earns +1 shot(can be used in next phase)
+   * Imposter name and role reveals in following day phase
+   * Sheriff remains anonymous
+ 
+ * If target is a crewmate
+
+   * Sheriff dies, targeted crewmate dies.
+   * Both names, roles, cause of death revealed in the following day phase
+
+#### Detective Logic
+
+* If 1 detective → investigate every 2 rounds
+* If 2 detectives → investigate every round
+
+  * Must both pick the same player
+  * If mismatch → investigation skipped
+  * Investigation reveals: "Impostor" or "Not Impostor"
+  * If one dies, other continue to investigate daily and DM chat is closed
+
+#### Engineer
+
+* When a failed round occurs:
+
+  * Gets DM prompt during Day Phase with:
+
+    * “Fix the ship?” (fix it/skip buttons)
+    * 30s to decide
+
+  * Can fix only once per game
+  * If skipped or ignored → failure counts
+
+---
+
+## ☀️ Day Phase (120 Seconds Total)
+
+1. Start (0s):
+
+   * Group message:
+
+     * Alive players list
+     * Night summary:
+
+       * Deaths (player name, cause, role)
+       * Task result: completed or failed
+       * Sheriff kill result (only reveals imposter if correct)
+
+2. Discussion (90s):
+
+   * Players talk in group
+   * Bot does nothing
+
+3. Voting (30s):
+
+   * Bot announces: “🗳 Voting has begun. Go to DM.”
+   * Each alive player:
+
+     * Votes privately in DM (list of alive players)
+     * May choose “Skip vote”
+     * Once voted, bot posts: “✅ PlayerName has voted.” (anonymous vote)
+   * After time:
+
+     * Most-voted player is ejected
+     * Their name, role revealed
+     * Tie or no vote → no ejection
+
+---
+
+## 💥 Game End Conditions
+
+### 🟢 Crewmate Win
+
+* All impostors are dead (via vote or sheriff kill)
+
+### 🔴 Impostor Win
+
+* Alive impostors ≥ alive non-impostors (including specials)
+
+### ⚫ Ship Explosion (Everyone Loses)
+
+* 2 failed task rounds (not necessarily in a row)
+* Engineer either:
+
+  * Has already used ability
+  * OR fails to respond in time
+* Bot posts: “💥 Ship exploded. Everyone loses.”
+
+---
+
+## 📚 Task Pool (Examples)
+
+Used for crewmate tasks (DM buttons):
+
+* “Align navigation → Confirm”
+* “Divert power → Flip switch”
+* “Fuel engines → Tap fuel button”
+* “Empty garbage → Press to open chute”
+* “Start reactor → Pattern matching”
+
+> Tasks must be designed for 1-click confirmation via inline buttons.
+
+---
+
+## 🧠 XP System
+
+### ✅ XP Rewards
+
+| Event                       | XP  |
+| --------------------------- | --- |
+| Win                         | +25 |
+| Loss                        | +5  |
+| Task completed              | +3  |
+| Correct vote                | +2  |
+| Impostor kill (as impostor) | +5  |
+| Sheriff kills impostor      | +10 |
+| Detective finds impostor    | +8  |
+| Engineer saves ship         | +15 |
+
+### ❌ XP Penalties
+
+| Event                   | XP  |
+| ----------------------- | --- |
+| Ship explodes           | -15 |
+| Friendly fire (sheriff) | -10 |
+| Missed vote/task (AFK)  | -5  |
+
+### 🔁 Streak Bonus
+
+* Each consecutive win increases XP bonus:
+
+  * +3 XP per additional win
+  * Resets on loss or AFK
+
+---
+
+## 🏅 Achievements
+
+Triggered by unique player actions:
+
+| Achievement            | Trigger                        |
+| ---------------------- | ------------------------------ |
+| First win              | Win 1 game                     |
+| 10 Tasks Completed     | Complete 10 tasks              |
+| Sheriff Clutch         | Kill impostor, win game        |
+| Engineer Save          | Fix ship successfully          |
+| Detective Streak       | 3 impostors found in 3 games   |
+| Perfect Crewmate Round | Tasks + vote correct + survive |
+
+* Stored in DB
+* DM announcement when unlocked
+
+---
+
+## 🗃️ PostgreSQL Tables (Outline)
+
+* `users`: id, xp, is\_banned, ban\_expiry, streak, achievements
+* `games`: id, mode, group\_id, phase, start\_time, end\_time
+* `players`: game\_id, user\_id, role, is\_alive, voted, completed\_task
+* `bans`: user\_id, start\_time, duration, reason
+* `achievements`: user\_id, flags (booleans or enum list)
+
+---
+
+## 🪵 Logging (structlog)
+
+Log all:
+
+* Phase transitions
+* Role assignments
+* Kills, votes, task results
+* Admin actions
+* XP changes
+* Achievement unlocks
+* Errors (timeouts, mismatched state, DM issues)
+
+---
+
+## ✅ Final Notes
+
+* All interactions respect Telegram limits
+* Inline buttons guide user to bot’s DM where needed
+* Game state and role visibility is **strictly isolated**
+* No spectators, appeals, or leaderboards (by request)
+* Every detail here is based on confirmed user input
+
+Perfect—here’s the final **note** and updated **folder structure** based on everything you've specified:
+
+---
+
+## 📝 Developer Note
+
+* All XP values, achievements, task definations, and log messages provided in this project are examples and can be customized freely
+* XP System is can be hardcoded inside the logic for simplicity, but the values can be tweaked easily
+* Task pool is stored in a separate python module to allow easy expansion and inline button integration
+* Achievements are stored in separate file, so new milestones can be added anytime
+* Every game details should be logged in game log channel like a new game is started by a user in particular group then it logs a new game started by this user in this group along with group link and after the game finishes then it logs that the game ended with winners details and time duration of the game (no need to log every single detail just game start game end and winners as well as all the players name) 
+* Every time a new user starts the bot or user gets banned or unbanned are logged in bot log channel
+* Logs and inline comments are intentionally styles in a sarcastic, Among-us themed tone for maximum sass and readability.
+   * Example: Sheriff just rage-clicked an innocent. RIP trust issues 💀🔫
+
+
+---
+
+## 📁 Final Folder Structure
+
+amongus/
+├── src/
+│   ├── bot/
+│   │   ├── handlers/
+│   │   │   ├── commands.py
+│   │   │   ├── admin.py
+│   │   │   └── callbacks.py
+│   │   ├── bot_instance.py
+│   │   └── dispatcher.py
+│   ├── game/
+│   │   ├── game_state.py
+│   │   ├── phase_manager.py
+│   │   ├── role_factory.py
+│   │   ├── win_conditions.py
+│   │   ├── task_engine.py
+│   │   └── task_pool.py   
+│   ├── roles/
+│   │   ├── base_role.py
+│   │   ├── crewmate.py
+│   │   ├── impostor.py
+│   │   ├── detective.py
+│   │   ├── sheriff.py
+│   │   └── engineer.py
+│   ├── database/
+│   │   ├── models.py
+│   │   └── connection.py
+│   ├── systems/
+│   │   ├── xp_system.py
+│   │   ├── ban_system.py
+│   │   ├── achievement_system.py
+│   │   ├── achievements.py     
+│   │   └── logger.py
+│   ├── ui/
+│   │   ├── keyboards.py
+│   │   └── messages.py
+│   ├── utils/
+│   │   ├── config.py
+│   │   └── constants.py
+│   └── main.py
+├── .env.example
+├── requirements.txt
+└── README.md
+```
+
+---
