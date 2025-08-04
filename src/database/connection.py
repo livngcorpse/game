@@ -247,5 +247,137 @@ class Database:
                 "UPDATE players SET completed_task = FALSE WHERE game_id = $1",
                 game_id
             )
+# Add these methods to src/database/connection.py
+
+async def get_game_by_id(self, game_id: str) -> Optional[Game]:
+    """Get game by its ID instead of group ID"""
+    async with self.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM games WHERE id = $1",
+            game_id
+        )
+        if row:
+            return Game(
+                id=row['id'],
+                mode=GameMode(row['mode']),
+                group_id=row['group_id'],
+                phase=GamePhase(row['phase']),
+                start_time=row['start_time'],
+                end_time=row['end_time'],
+                creator_id=row['creator_id'],
+                failed_task_rounds=row['failed_task_rounds'],
+                settings=row['settings'] or {}
+            )
+        return None
+
+async def get_alive_players(self, game_id: str) -> List[Player]:
+    """Get only alive players from a game"""
+    async with self.pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM players WHERE game_id = $1 AND is_alive = TRUE",
+            game_id
+        )
+        return [Player(
+            game_id=row['game_id'],
+            user_id=row['user_id'],
+            role=Role(row['role']),
+            is_alive=row['is_alive'],
+            voted=row['voted'],
+            completed_task=row['completed_task'],
+            sheriff_shots_used=row['sheriff_shots_used'],
+            detective_last_investigation=row['detective_last_investigation'],
+            engineer_used_ability=row['engineer_used_ability']
+        ) for row in rows]
+
+async def get_players_by_role(self, game_id: str, role: Role) -> List[Player]:
+    """Get all players with a specific role"""
+    async with self.pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM players WHERE game_id = $1 AND role = $2",
+            game_id, role.value
+        )
+        return [Player(
+            game_id=row['game_id'],
+            user_id=row['user_id'],
+            role=Role(row['role']),
+            is_alive=row['is_alive'],
+            voted=row['voted'],
+            completed_task=row['completed_task'],
+            sheriff_shots_used=row['sheriff_shots_used'],
+            detective_last_investigation=row['detective_last_investigation'],
+            engineer_used_ability=row['engineer_used_ability']
+        ) for row in rows]
+
+async def get_player_field(self, game_id: str, user_id: int, field: str) -> Any:
+    """Get a specific field value for a player"""
+    async with self.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"SELECT {field} FROM players WHERE game_id = $1 AND user_id = $2",
+            game_id, user_id
+        )
+        return row[field] if row else None
+
+async def get_voters_for_target(self, game_id: str, target_id: int) -> List[int]:
+    """Get list of users who voted for a specific target"""
+    # This would need a votes table to track individual votes
+    # For now, this is a placeholder that should be implemented
+    # when you add proper vote tracking
+    async with self.pool.acquire() as conn:
+        # This assumes you'll add a votes table later
+        # For now, return empty list
+        return []
+
+async def get_game_round(self, game_id: str) -> int:
+    """Get current round number for a game"""
+    async with self.pool.acquire() as conn:
+        # You might want to add a round_number field to games table
+        # For now, calculate based on game duration or add to game settings
+        row = await conn.fetchrow(
+            "SELECT settings FROM games WHERE id = $1",
+            game_id
+        )
+        if row and row['settings']:
+            return row['settings'].get('round_number', 1)
+        return 1
+
+async def update_game_settings(self, game_id: str, settings: Dict[str, Any]):
+    """Update game settings JSON field"""
+    async with self.pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE games SET settings = $1 WHERE id = $2",
+            json.dumps(settings), game_id
+        )
+
+# You'll also need to create a votes table for proper vote tracking:
+async def create_votes_table(self):
+    """Add this to your _create_tables method"""
+    async with self.pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS votes (
+                game_id TEXT NOT NULL,
+                voter_id BIGINT NOT NULL,
+                target_id BIGINT,
+                round_number INTEGER NOT NULL,
+                timestamp TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (game_id, voter_id, round_number)
+            )
+        """)
+
+async def record_vote(self, game_id: str, voter_id: int, target_id: Optional[int], round_number: int):
+    """Record a player's vote"""
+    async with self.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO votes (game_id, voter_id, target_id, round_number) VALUES ($1, $2, $3, $4) ON CONFLICT (game_id, voter_id, round_number) DO UPDATE SET target_id = $3",
+            game_id, voter_id, target_id, round_number
+        )
+
+async def get_vote_results(self, game_id: str, round_number: int) -> Dict[int, int]:
+    """Get vote counts for current round"""
+    async with self.pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT target_id, COUNT(*) as vote_count FROM votes WHERE game_id = $1 AND round_number = $2 GROUP BY target_id",
+            game_id, round_number
+        )
+        return {row['target_id'] or -1: row['vote_count'] for row in rows}  # -1 for skip votes
 
 db = Database()

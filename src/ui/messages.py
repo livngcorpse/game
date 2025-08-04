@@ -1,5 +1,5 @@
 from typing import List, Dict, Any
-from src.database.models import GameMode
+from src.database.models import GameMode, Role
 
 class Messages:
     @staticmethod
@@ -85,3 +85,71 @@ class Messages:
     @staticmethod
     def get_dm_redirect_message() -> str:
         return "📱 Please start a conversation with me in DM first, then use the button below."
+    
+   # Add these methods to src/ui/messages.py
+
+@staticmethod
+def get_role_description(role: Role) -> str:
+    """Get detailed role descriptions"""
+    descriptions = {
+        Role.CREWMATE: "Complete tasks and vote out impostors. You win when all impostors are eliminated.",
+        Role.IMPOSTOR: "Eliminate crewmates and avoid detection. You win when impostors equal or outnumber others.",
+        Role.DETECTIVE: "Investigate players to find impostors. Your findings are private.",
+        Role.SHERIFF: "You can shoot one player. If you hit an impostor, you get another shot. Friendly fire kills both you and the target.",
+        Role.ENGINEER: "Fix the ship when tasks fail. You can only fix once per game."
+    }
+    return descriptions.get(role, "Unknown role")
+
+@staticmethod
+def get_detective_result_message(target_id: int, result: str) -> str:
+    """Format detective investigation results"""
+    return f"🕵️ Investigation Result:\nPlayer {target_id} is: **{result}**"
+
+@staticmethod
+def get_vote_breakdown_message(votes: Dict[int, int]) -> str:
+    """Format voting breakdown"""
+    if not votes:
+        return "📊 No votes were cast."
+    
+    msg = "📊 Vote Breakdown:\n"
+    for target_id, vote_count in sorted(votes.items(), key=lambda x: x[1], reverse=True):
+        if target_id == -1:  # Skip votes
+            msg += f"• Skip: {vote_count} votes\n"
+        else:
+            msg += f"• Player {target_id}: {vote_count} votes\n"
+    
+    return msg
+
+@staticmethod
+def get_impostor_chat_message(impostor_id: int, message: str) -> str:
+    """Format impostor team chat messages"""
+    return f"🔪 Impostor {impostor_id}: {message}"
+
+@staticmethod
+def get_detective_chat_message(detective_id: int, message: str) -> str:
+    """Format detective team chat messages"""
+    return f"🕵️ Detective {detective_id}: {message}"
+
+@staticmethod
+def get_task_completion_message(task_name: str, success: bool) -> str:
+    """Format task completion messages"""
+    if success:
+        return f"✅ Task completed: {task_name}"
+    else:
+        return f"❌ Task failed: {task_name}"
+
+@staticmethod
+def get_engineer_fix_message(fixed: bool) -> str:
+    """Format engineer ship fix messages"""
+    if fixed:
+        return "⚙️ Ship systems fixed! Tasks failure averted."
+    else:
+        return "⚙️ Engineer chose not to fix the ship."
+
+@staticmethod
+def get_sheriff_action_message(target_id: int, success: bool) -> str:
+    """Format sheriff action messages"""
+    if success:
+        return f"🔫 You shot Player {target_id} - they were an impostor! You get another shot."
+    else:
+        return f"💀 You shot Player {target_id} - friendly fire! Both of you died."

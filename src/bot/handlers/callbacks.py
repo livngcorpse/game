@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from src.bot.bot_instance import bot_instance
-from src.database.models import GamePhase, GameMode
+from src.database.models import GamePhase, GameMode, Role
 from src.ui.messages import Messages
 from src.ui.keyboards import Keyboards
 
@@ -89,11 +89,17 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     parts = query.data.split("_")
-    game_id = parts[1]
-    target_id = int(parts[2]) if parts[2] != "skip" else None
+    if parts[1] == "skip":
+        game_id = parts[2]
+        target_id = None
+    else:
+        game_id = parts[1]
+        target_id = int(parts[2])
+    
     user_id = query.from_user.id
     
-    game = await bot_instance.db.get_game_by_group(0)
+    # Fix: Get game by game_id, not hardcoded 0
+    game = await bot_instance.db.get_game_by_id(game_id)
     if not game or game.phase != GamePhase.VOTING:
         await query.edit_message_text("❌ Voting phase not active!")
         return
@@ -109,8 +115,100 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await bot_instance.game_state.vote_player(game_id, user_id, target_id)
     
+    # Announce in group that player voted (anonymously)
+    await bot_instance.bot.send_message(
+        game.group_id, 
+        f"✅ Player {user_id} has voted."
+    )
+    
     vote_text = f"Player {target_id}" if target_id else "Skip"
     await query.edit_message_text(f"✅ You voted for: {vote_text}")
+
+# NEW: Missing night action callbacks for each role
+async def impostor_kill_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle impostor kill actions"""
+    query = update.callback_query
+    await query.answer()
+    
+    parts = query.data.split("_")
+    action = parts[1]  # "kill" or "skip"
+    game_id = parts[2]
+    target_id = int(parts[3]) if len(parts) > 3 and parts[3] != game_id else None
+    user_id = query.from_user.id
+    
+    # Validate player can act
+    player = await bot_instance.db.get_player(game_id, user_id)
+    if not player or not player.is_alive or player.role != Role.IMPOSTOR:
+        await query.answer("❌ You cannot perform this action!", show_alert=True)
+        return
+    
+    if action == "skip":
+        await query.edit_message_text("🔪 You chose to skip killing.")
+        return
+    
+    # Process the kill action
+    result = await bot_instance.phase_manager.process_impostor_action(
+        game_id, user_id, "kill", target_id
+    )
+    
+    await query.edit_message_text(f"🔪 {result['message']}")
+
+async def detective_investigate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle detective investigation actions"""
+    query = update.callback_query
+    await query.answer()
+    
+    parts = query.data.split("_")
+    action = parts[1]  # "investigate" or "skip"
+    game_id = parts[2]
+    target_id = int(parts[3]) if len(parts) > 3 and parts[3] != game_id else None
+    user_id = query.from_user.id
+    
+    player = await bot_instance.db.get_player(game_id, user_id)
+    if not player or not player.is_alive or player.role != Role.DETECTIVE:
+        await query.answer("❌ You cannot perform this action!", show_alert=True)
+        return
+    
+    if action == "skip":
+        await query.edit_message_text("🕵️ You chose to skip investigating.")
+        return
+    
+    result = await bot_instance.phase_manager.process_detective_action(
+        game_id, user_id, "investigate", target_id
+    )
+    
+    await query.edit_message_text(f"🕵️ {result['message']}")
+
+async def sheriff_shoot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle sheriff shoot actions"""
+    query = update.callback_query
+    await query.answer()
+    
+    parts = query.data.split("_")
+    action = parts[1]  # "shoot" or "skip"
+    game_id = parts[2]
+    target_id = int(parts[3]) if len(parts) > 3 and parts[3] != game_id else None
+    user_id = query.from_user.id
+    
+    player = await bot_instance.db.get_player(game_id, user_id)
+    if not player or not player.is_alive or player.role != Role.SHERIFF:
+        await query.answer("❌ You cannot perform this action!", show_alert=True)
+        return
+    
+    # Check if already used shot
+    if await bot_instance.db.get_player_field(game_id, user_id, "sheriff_used_shot"):
+        await query.answer("❌ You already used your shot!", show_alert=True)
+        return
+    
+    if action == "skip":
+        await query.edit_message_text("🔫 You chose not to shoot.")
+        return
+    
+    result = await bot_instance.phase_manager.process_sheriff_action(
+        game_id, user_id, "shoot", target_id
+    )
+    
+    await query.edit_message_text(f"🔫 {result['message']}")
 
 async def task_complete_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -119,66 +217,57 @@ async def task_complete_callback(update: Update, context: ContextTypes.DEFAULT_T
     parts = query.data.split("_")
     game_id = parts[2]
     user_id = int(parts[3])
+    task_id = parts[4] if len(parts) > 4 else None
     
     if query.from_user.id != user_id:
         await query.answer("❌ This is not your task!", show_alert=True)
         return
     
-    success = await bot_instance.task_engine.complete_task(game_id, user_id)
+    # Validate player can complete tasks
+    player = await bot_instance.db.get_player(game_id, user_id)
+    if not player or not player.is_alive or player.role != Role.CREWMATE:
+        await query.answer("❌ You cannot complete tasks!", show_alert=True)
+        return
+    
+    success = await bot_instance.task_engine.complete_task(game_id, user_id, task_id)
     if success:
         await bot_instance.xp_system.award_xp(user_id, "task_completed")
-        await query.edit_message_text("✅ Task completed!")
+        await query.edit_message_text("✅ Task completed successfully!")
     else:
-        await query.edit_message_text("❌ Task not assigned to you!")
+        await query.edit_message_text("❌ Task completion failed!")
 
-async def night_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = query.from_user.id
-    action_data = query.data
-    
-    parts = action_data.split("_")
-    if len(parts) < 3:
-        return
-    
-    role_name = parts[0]
-    game_id = parts[2]
-    
-    player = await bot_instance.db.get_player(game_id, user_id)
-    if not player or not player.is_alive:
-        await query.answer("❌ You cannot perform actions!", show_alert=True)
-        return
-    
-    role_instance = bot_instance.role_factory.create_role_instance(
-        user_id, game_id, player.role, bot_instance.game_state.get_round_number(game_id)
-    )
-    
-    result = await role_instance.process_night_action(action_data)
-    await bot_instance.phase_manager.record_night_action(game_id, user_id, role_name, result)
-    
-    await query.edit_message_text(f"✅ Action recorded: {result.get('action', 'unknown')}")
-
-async def engineer_day_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def engineer_fix_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle engineer fix/skip actions"""
     query = update.callback_query
     await query.answer()
     
     parts = query.data.split("_")
-    action = parts[1]
+    action = parts[1]  # "fix" or "skip"
     game_id = parts[2]
     user_id = query.from_user.id
     
     player = await bot_instance.db.get_player(game_id, user_id)
-    if not player or player.role.value != "engineer":
+    if not player or not player.is_alive or player.role != Role.ENGINEER:
         await query.answer("❌ You are not the engineer!", show_alert=True)
         return
     
+    # Check if already used ability
+    if await bot_instance.db.get_player_field(game_id, user_id, "engineer_used_ability"):
+        await query.answer("❌ You already used your fix ability!", show_alert=True)
+        return
+    
     if action == "fix":
+        # Mark as used and reset failed rounds
         await bot_instance.db.update_player_field(game_id, user_id, "engineer_used_ability", True)
+        await bot_instance.game_state.reset_failed_rounds(game_id)  # Reset failed count
         await bot_instance.xp_system.award_xp(user_id, "engineer_saves_ship")
-        await query.edit_message_text("⚙️ Ship fixed! Crisis averted!")
+        await query.edit_message_text("⚙️ Ship systems fixed! Crisis averted!")
+        
+        # Log the heroic save
+        await bot_instance.game_logger.log_engineer_action(game_id, user_id, True)
     else:
-        await query.edit_message_text("⚙️ Fix skipped.")
+        await query.edit_message_text("⚙️ You chose not to fix the ship.")
+        await bot_instance.game_logger.log_engineer_action(game_id, user_id, False)
 
 async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -187,13 +276,53 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_type = query.data.split("_")[1]
     
     messages = {
-        "rules": "📜 Rules:\n• Find and vote out impostors\n• Complete tasks to win\n• Special roles have unique abilities",
-        "roles": "🎭 Roles:\n• Crewmate: Complete tasks\n• Impostor: Eliminate crew\n• Detective: Investigate players\n• Sheriff: Eliminate players\n• Engineer: Fix ship",
-        "commands": "📋 Commands:\n• /startgame - Create game\n• /join - Join game\n• /help - This help\n• /ping - Test bot",
-        "about": "🤖 About:\nAmong Us Telegram Bot\nDeveloped for group gameplay"
+        "rules": "📜 **Game Rules:**\n\n• Find and vote out all impostors to win\n• Complete tasks when assigned\n• Use your role's special abilities wisely\n• Discussion phase: talk strategy\n• Voting phase: vote out suspicious players",
+        
+        "roles": "🎭 **Roles Guide:**\n\n🟦 **Crewmate**: Complete tasks, vote out impostors\n🔴 **Impostor**: Kill crewmates, blend in\n🕵️ **Detective**: Find impostors through investigation\n🔫 **Sheriff**: Eliminate players (beware friendly fire!)\n⚙️ **Engineer**: Fix ship when tasks fail",
+        
+        "commands": "📋 **Commands:**\n\n🎮 **Game Commands:**\n• `/startgame [ranked/unranked]` - Create new game\n• `/join` - Join active game\n• `/begin` - Force start (creator only)\n• `/end` - End game (admin/creator only)\n\n📱 **Utility:**\n• `/help` - Show this help\n• `/ping` - Test bot\n• `/stats` - Your game statistics",
+        
+        "about": "🤖 **About This Bot:**\n\nAmong Us Telegram Bot v2.0\n\n• Supports 4-20 players\n• Ranked and unranked modes\n• Full role system with special abilities\n• XP and achievement system\n• Developed with ❤️ for group gameplay\n\n🔗 GitHub: [Repository Link]\n👨‍💻 Developer: [Your Name]"
     }
     
     await query.edit_message_text(
-        messages.get(help_type, "Unknown help topic"),
-        reply_markup=Keyboards.get_help_commands_keyboard()
+        messages.get(help_type, "❌ Unknown help topic"),
+        reply_markup=Keyboards.get_help_commands_keyboard(),
+        parse_mode='Markdown'
     )
+
+# NEW: Callback router function
+async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Main callback router - directs callbacks to appropriate handlers"""
+    query = update.callback_query
+    callback_data = query.data
+    
+    # Route callbacks based on prefix
+    if callback_data.startswith("join_game_"):
+        await join_game_callback(update, context)
+    elif callback_data.startswith("begin_game_"):
+        await begin_game_callback(update, context)
+    elif callback_data.startswith("end_game_"):
+        await end_game_callback(update, context)
+    elif callback_data.startswith("vote_"):
+        await vote_callback(update, context)
+    elif callback_data.startswith("impostor_"):
+        await impostor_kill_callback(update, context)
+    elif callback_data.startswith("detective_"):
+        await detective_investigate_callback(update, context)
+    elif callback_data.startswith("sheriff_"):
+        await sheriff_shoot_callback(update, context)
+    elif callback_data.startswith("task_complete_"):
+        await task_complete_callback(update, context)
+    elif callback_data.startswith("engineer_"):
+        await engineer_fix_callback(update, context)
+    elif callback_data.startswith("help_"):
+        await help_callback(update, context)
+    else:
+        # Handle unknown callbacks gracefully
+        await query.answer("❌ Unknown action!", show_alert=True)
+
+# DEPRECATED: Remove this old generic handler
+# async def night_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     # This approach was too generic and problematic
+#     pass
