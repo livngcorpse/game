@@ -47,7 +47,7 @@ class Player(BaseModel):
     is_alive: bool = True
     voted: bool = False
     completed_task: bool = False
-    sheriff_shots_used: int = 0
+    sheriff_used_shot: bool = False
     detective_last_investigation: int = 0
     engineer_used_ability: bool = False
 

@@ -56,7 +56,7 @@ class Database:
                     is_alive BOOLEAN DEFAULT TRUE,
                     voted BOOLEAN DEFAULT FALSE,
                     completed_task BOOLEAN DEFAULT FALSE,
-                    sheriff_shots_used INTEGER DEFAULT 0,
+                    sheriff_used_shot BOOLEAN DEFAULT FALSE,
                     detective_last_investigation INTEGER DEFAULT 0,
                     engineer_used_ability BOOLEAN DEFAULT FALSE,
                     PRIMARY KEY (game_id, user_id)
@@ -218,24 +218,9 @@ class Database:
     async def add_player(self, player: Player):
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO players (game_id, user_id, role) VALUES ($1, $2, $3)",
-                player.game_id, player.user_id, player.role.value
+                "INSERT INTO players (game_id, user_id, role, sheriff_used_shot, detective_last_investigation, engineer_used_ability) VALUES ($1, $2, $3, $4, $5, $6)",
+                player.game_id, player.user_id, player.role.value, player.sheriff_used_shot, player.detective_last_investigation, player.engineer_used_ability
             )
-
-    async def get_players(self, game_id: str) -> List[Player]:
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM players WHERE game_id = $1", game_id)
-            return [Player(
-                game_id=row['game_id'],
-                user_id=row['user_id'],
-                role=Role(row['role']),
-                is_alive=row['is_alive'],
-                voted=row['voted'],
-                completed_task=row['completed_task'],
-                sheriff_shots_used=row['sheriff_shots_used'],
-                detective_last_investigation=row['detective_last_investigation'],
-                engineer_used_ability=row['engineer_used_ability']
-            ) for row in rows]
 
     async def get_player(self, game_id: str, user_id: int) -> Optional[Player]:
         async with self.pool.acquire() as conn:
@@ -251,49 +236,74 @@ class Database:
                     is_alive=row['is_alive'],
                     voted=row['voted'],
                     completed_task=row['completed_task'],
-                    sheriff_shots_used=row['sheriff_shots_used'],
+                    sheriff_used_shot=row['sheriff_used_shot'],
                     detective_last_investigation=row['detective_last_investigation'],
                     engineer_used_ability=row['engineer_used_ability']
                 )
             return None
 
+    async def get_players(self, game_id: str) -> List[Player]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM players WHERE game_id = $1",
+                game_id
+            )
+            return [
+                Player(
+                    game_id=row['game_id'],
+                    user_id=row['user_id'],
+                    role=Role(row['role']),
+                    is_alive=row['is_alive'],
+                    voted=row['voted'],
+                    completed_task=row['completed_task'],
+                    sheriff_used_shot=row['sheriff_used_shot'],
+                    detective_last_investigation=row['detective_last_investigation'],
+                    engineer_used_ability=row['engineer_used_ability']
+                )
+                for row in rows
+            ]
+
     async def get_alive_players(self, game_id: str) -> List[Player]:
-        """Get only alive players from a game"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM players WHERE game_id = $1 AND is_alive = TRUE",
                 game_id
             )
-            return [Player(
-                game_id=row['game_id'],
-                user_id=row['user_id'],
-                role=Role(row['role']),
-                is_alive=row['is_alive'],
-                voted=row['voted'],
-                completed_task=row['completed_task'],
-                sheriff_shots_used=row['sheriff_shots_used'],
-                detective_last_investigation=row['detective_last_investigation'],
-                engineer_used_ability=row['engineer_used_ability']
-            ) for row in rows]
+            return [
+                Player(
+                    game_id=row['game_id'],
+                    user_id=row['user_id'],
+                    role=Role(row['role']),
+                    is_alive=row['is_alive'],
+                    voted=row['voted'],
+                    completed_task=row['completed_task'],
+                    sheriff_used_shot=row['sheriff_used_shot'],
+                    detective_last_investigation=row['detective_last_investigation'],
+                    engineer_used_ability=row['engineer_used_ability']
+                )
+                for row in rows
+            ]
 
     async def get_players_by_role(self, game_id: str, role: Role) -> List[Player]:
-        """Get all players with a specific role"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM players WHERE game_id = $1 AND role = $2",
                 game_id, role.value
             )
-            return [Player(
-                game_id=row['game_id'],
-                user_id=row['user_id'],
-                role=Role(row['role']),
-                is_alive=row['is_alive'],
-                voted=row['voted'],
-                completed_task=row['completed_task'],
-                sheriff_shots_used=row['sheriff_shots_used'],
-                detective_last_investigation=row['detective_last_investigation'],
-                engineer_used_ability=row['engineer_used_ability']
-            ) for row in rows]
+            return [
+                Player(
+                    game_id=row['game_id'],
+                    user_id=row['user_id'],
+                    role=Role(row['role']),
+                    is_alive=row['is_alive'],
+                    voted=row['voted'],
+                    completed_task=row['completed_task'],
+                    sheriff_used_shot=row['sheriff_used_shot'],
+                    detective_last_investigation=row['detective_last_investigation'],
+                    engineer_used_ability=row['engineer_used_ability']
+                )
+                for row in rows
+            ]
 
     async def update_player_field(self, game_id: str, user_id: int, field: str, value: Any):
         async with self.pool.acquire() as conn:

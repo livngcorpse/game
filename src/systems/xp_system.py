@@ -1,6 +1,7 @@
 from src.utils.constants import XP_REWARDS, XP_PENALTIES, STREAK_BONUS
 from src.database.connection import db
 from src.systems.achievement_system import AchievementSystem
+from typing import Any
 
 class XPSystem:
     def __init__(self, achievement_system: AchievementSystem):
@@ -82,7 +83,7 @@ class XPSystem:
             if detective_streak >= 3:
                 await self.achievement_system.check_and_award(user_id, "detective_finds_3")
 
-    async def _update_user_achievement(self, user_id: int, key: str, value: any):
+    async def _update_user_achievement(self, user_id: int, key: str, value: Any):
         """Update a specific achievement counter for a user"""
         user = await db.get_user(user_id)
         if not user:
