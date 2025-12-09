@@ -33,19 +33,66 @@ class XPSystem:
             await db.update_user_xp(user_id, -penalty)
 
     async def _check_achievements(self, user_id: int, event: str, context: dict):
-        if event == "win":
-            user = await db.get_user(user_id)
-            if user and user.xp >= 25:
-                await self.achievement_system.check_and_award(user_id, "win_count_1")
-
+        user = await db.get_user(user_id)
+        if not user:
+            return
+            
+        # Track task completions
         if event == "task_completed":
-            await self.achievement_system.check_and_award(user_id, "tasks_completed_10")
+            # Increment task counter in user achievements
+            task_count = user.achievements.get("task_counter", 0) + 1
+            await self._update_user_achievement(user_id, "task_counter", task_count)
+            
+            # Check for Task Master achievement
+            if task_count >= 10:
+                await self.achievement_system.check_and_award(user_id, "tasks_completed_10")
 
-        if event == "sheriff_kills_impostor" and context.get("game_won"):
-            await self.achievement_system.check_and_award(user_id, "sheriff_kill_win")
+        # Track wins
+        if event == "win":
+            # Check for First Victory achievement
+            if user.xp >= 25:  # Assuming first win gives 25 XP
+                await self.achievement_system.check_and_award(user_id, "win_count_1")
+            
+            # Track win streak for other achievements
+            win_streak = user.achievements.get("win_streak", 0) + 1
+            await self._update_user_achievement(user_id, "win_streak", win_streak)
 
+        # Track losses
+        elif event == "loss":
+            # Reset win streak
+            await self._update_user_achievement(user_id, "win_streak", 0)
+
+        # Track sheriff kills
+        if event == "sheriff_kills_impostor":
+            # Check for Sheriff Clutch achievement
+            if context.get("game_won"):
+                await self.achievement_system.check_and_award(user_id, "sheriff_kill_win")
+
+        # Track engineer saves
         if event == "engineer_saves_ship":
             await self.achievement_system.check_and_award(user_id, "engineer_fix_success")
 
+        # Track detective findings
         if event == "detective_finds_impostor":
-            await self.achievement_system.check_and_award(user_id, "detective_finds_3")
+            # Track detective streak
+            detective_streak = user.achievements.get("detective_streak", 0) + 1
+            await self._update_user_achievement(user_id, "detective_streak", detective_streak)
+            
+            # Check for Detective Streak achievement
+            if detective_streak >= 3:
+                await self.achievement_system.check_and_award(user_id, "detective_finds_3")
+
+    async def _update_user_achievement(self, user_id: int, key: str, value: any):
+        """Update a specific achievement counter for a user"""
+        user = await db.get_user(user_id)
+        if not user:
+            return
+            
+        achievements = user.achievements or {}
+        achievements[key] = value
+        
+        async with db.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET achievements = $1 WHERE id = $2",
+                achievements, user_id
+            )

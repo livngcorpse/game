@@ -14,6 +14,7 @@ class BotInstance:
     def __init__(self):
         self.application = Application.builder().token(BOT_TOKEN).build()
         self.bot = self.application.bot
+        self.db = db
         
         self.task_engine = TaskEngine()
         self.role_factory = RoleFactory(self.task_engine)

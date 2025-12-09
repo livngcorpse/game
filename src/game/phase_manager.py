@@ -40,21 +40,35 @@ class PhaseManager:
             await self.cancel_game(game_id, group_id)
 
     async def start_game_from_lobby(self, game_id: str, group_id: int):
-        if await self.game_state.start_game(game_id):
-            await self.game_logger.log_game_start(
-                game_id, 
-                (await self.game_state.get_game_by_group(group_id)).creator_id,
-                group_id, 
-                (await self.game_state.get_game_by_group(group_id)).mode.value,
-                len(await db.get_players(game_id))
-            )
-            
-            # Send role assignments via DM
-            await self._send_role_assignments(game_id)
-            
-            # Wait 5 seconds then start night phase
-            await asyncio.sleep(5)
-            await self.start_night_phase(game_id, group_id)
+        try:
+            if await self.game_state.start_game(game_id):
+                await self.game_logger.log_game_start(
+                    game_id, 
+                    (await self.game_state.get_game_by_group(group_id)).creator_id,
+                    group_id, 
+                    (await self.game_state.get_game_by_group(group_id)).mode.value,
+                    len(await db.get_players(game_id))
+                )
+                
+                # Send role assignments via DM
+                await self._send_role_assignments(game_id)
+                
+                # Wait 5 seconds then start night phase
+                await asyncio.sleep(5)
+                await self.start_night_phase(game_id, group_id)
+        except Exception as e:
+            # Log the error and cancel the game
+            await self.game_logger.log_error(f"Error starting game: {e}", {"game_id": game_id, "group_id": group_id})
+            # Try to notify the group
+            try:
+                await self.bot.send_message(group_id, "❌ Error starting game. Please try again.")
+            except:
+                pass
+            # Clean up the game state
+            try:
+                await self.game_state.end_game(game_id)
+            except:
+                pass
 
     async def cancel_game(self, game_id: str, group_id: int):
         # Notify lobby players
@@ -107,22 +121,31 @@ class PhaseManager:
 
     async def resolve_night_actions(self, game_id: str, group_id: int):
         """Enhanced night action resolution with proper order"""
-        # Process actions in correct order
-        night_summary = await self._resolve_actions_in_order(game_id)
-        
-        # Check win conditions
-        win_condition = await WinConditions.check_win_condition(game_id)
-        ship_exploded = await WinConditions.check_ship_explosion(game_id)
-        
-        if ship_exploded:
-            await self.end_game_explosion(game_id, group_id)
-            return
-        
-        if win_condition:
-            await self.end_game_victory(game_id, group_id, win_condition)
-            return
-        
-        await self.start_day_phase(game_id, group_id, night_summary)
+        try:
+            # Process actions in correct order
+            night_summary = await self._resolve_actions_in_order(game_id)
+            
+            # Check win conditions
+            win_condition = await WinConditions.check_win_condition(game_id)
+            ship_exploded = await WinConditions.check_ship_explosion(game_id)
+            
+            if ship_exploded:
+                await self.end_game_explosion(game_id, group_id)
+                return
+            
+            if win_condition:
+                await self.end_game_victory(game_id, group_id, win_condition)
+                return
+            
+            await self.start_day_phase(game_id, group_id, night_summary)
+        except Exception as e:
+            # Log the error and end the game gracefully
+            await self.game_logger.log_error(f"Error resolving night actions: {e}", {"game_id": game_id, "group_id": group_id})
+            # Try to end the game gracefully
+            try:
+                await self.game_state.end_game(game_id)
+            except Exception as end_game_error:
+                await self.game_logger.log_error(f"Error ending game after night action failure: {end_game_error}", {"game_id": game_id})
 
     async def _resolve_actions_in_order(self, game_id: str) -> Dict[str, Any]:
         """Process night actions in correct order"""
@@ -395,38 +418,47 @@ class PhaseManager:
 
     async def resolve_voting(self, game_id: str, group_id: int):
         """Enhanced voting resolution with detailed results"""
-        vote_result = await self.game_state.resolve_votes(game_id)
-        
-        # Announce voting results in group
-        if vote_result["ejected"]:
-            ejected_player = await db.get_player(game_id, vote_result["ejected"])
-            result_message = Messages.get_voting_result_message(
-                vote_result["ejected"], 
-                ejected_player.role.value
-            )
-            await self.bot.send_message(group_id, result_message)
-            await self.game_logger.log_vote(game_id, 0, vote_result["ejected"])
+        try:
+            vote_result = await self.game_state.resolve_votes(game_id)
             
-            # Award XP for correct votes
-            if ejected_player.role == Role.IMPOSTOR:
-                voters = await db.get_voters_for_target(game_id, vote_result["ejected"])
-                for voter_id in voters:
-                    await self.xp_system.award_xp(voter_id, "correct_vote")
-        else:
-            no_ejection_message = Messages.get_voting_result_message(None, "")
-            await self.bot.send_message(group_id, no_ejection_message)
-        
-        # Show vote breakdown
-        if vote_result["votes"]:
-            vote_breakdown = Messages.get_vote_breakdown_message(vote_result["votes"])
-            await self.bot.send_message(group_id, vote_breakdown)
-        
-        win_condition = await WinConditions.check_win_condition(game_id)
-        if win_condition:
-            await self.end_game_victory(game_id, group_id, win_condition)
-            return
-        
-        await self.start_night_phase(game_id, group_id)
+            # Announce voting results in group
+            if vote_result["ejected"]:
+                ejected_player = await db.get_player(game_id, vote_result["ejected"])
+                result_message = Messages.get_voting_result_message(
+                    vote_result["ejected"], 
+                    ejected_player.role.value
+                )
+                await self.bot.send_message(group_id, result_message)
+                await self.game_logger.log_vote(game_id, 0, vote_result["ejected"])
+                
+                # Award XP for correct votes
+                if ejected_player.role == Role.IMPOSTOR:
+                    voters = await db.get_voters_for_target(game_id, vote_result["ejected"])
+                    for voter_id in voters:
+                        await self.xp_system.award_xp(voter_id, "correct_vote")
+            else:
+                no_ejection_message = Messages.get_voting_result_message(None, "")
+                await self.bot.send_message(group_id, no_ejection_message)
+            
+            # Show vote breakdown
+            if vote_result["votes"]:
+                vote_breakdown = Messages.get_vote_breakdown_message(vote_result["votes"])
+                await self.bot.send_message(group_id, vote_breakdown)
+            
+            win_condition = await WinConditions.check_win_condition(game_id)
+            if win_condition:
+                await self.end_game_victory(game_id, group_id, win_condition)
+                return
+            
+            await self.start_night_phase(game_id, group_id)
+        except Exception as e:
+            # Log the error and end the game gracefully
+            await self.game_logger.log_error(f"Error resolving voting: {e}", {"game_id": game_id, "group_id": group_id})
+            # Try to end the game gracefully
+            try:
+                await self.game_state.end_game(game_id)
+            except Exception as end_game_error:
+                await self.game_logger.log_error(f"Error ending game after voting failure: {end_game_error}", {"game_id": game_id})
 
     async def _send_role_assignments(self, game_id: str):
         """Send role assignments via DM"""

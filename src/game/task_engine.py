@@ -33,7 +33,7 @@ class TaskEngine:
     def get_player_task(self, game_id: str, user_id: int) -> dict:
         return self.active_tasks.get(game_id, {}).get(user_id)
 
-    async def complete_task(self, game_id: str, user_id: int) -> bool:
+    async def complete_task(self, game_id: str, user_id: int, task_id: str = None) -> bool:
         if game_id in self.active_tasks and user_id in self.active_tasks[game_id]:
             await db.update_player_field(game_id, user_id, "completed_task", True)
             return True

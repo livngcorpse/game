@@ -25,14 +25,7 @@ def setup_handlers(application):
     ]
     
     callback_handlers = [
-        CallbackQueryHandler(callbacks.join_game_callback, pattern=r"^join_game_"),
-        CallbackQueryHandler(callbacks.begin_game_callback, pattern=r"^begin_game_"),
-        CallbackQueryHandler(callbacks.end_game_callback, pattern=r"^end_game_"),
-        CallbackQueryHandler(callbacks.vote_callback, pattern=r"^vote_"),
-        CallbackQueryHandler(callbacks.task_complete_callback, pattern=r"^task_complete_"),
-        CallbackQueryHandler(callbacks.night_action_callback, pattern=r"^(impostor|detective|sheriff)_"),
-        CallbackQueryHandler(callbacks.engineer_day_callback, pattern=r"^engineer_(fix|skip)_"),
-        CallbackQueryHandler(callbacks.help_callback, pattern=r"^help_"),
+        CallbackQueryHandler(callbacks.handle_callback_query),
     ]
     
     for handler in command_handlers:

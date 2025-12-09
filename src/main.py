@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 from src.bot.bot_instance import bot_instance
 from src.bot.dispatcher import setup_handlers
 
@@ -27,15 +28,33 @@ async def main():
             await asyncio.Event().wait()
         except KeyboardInterrupt:
             logger.info("Received shutdown signal")
-        
+        except Exception as e:
+            logger.error(f"Unexpected error during bot operation: {e}", exc_info=True)
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logger.error(f"Fatal error during bot startup: {e}", exc_info=True)
+        sys.exit(1)
     finally:
         logger.info("Shutting down bot")
-        await bot_instance.application.updater.stop()
-        await bot_instance.application.stop()
-        await bot_instance.application.shutdown()
-        await bot_instance.shutdown()
+        try:
+            await bot_instance.application.updater.stop()
+        except Exception as e:
+            logger.error(f"Error stopping updater: {e}")
+        try:
+            await bot_instance.application.stop()
+        except Exception as e:
+            logger.error(f"Error stopping application: {e}")
+        try:
+            await bot_instance.application.shutdown()
+        except Exception as e:
+            logger.error(f"Error shutting down application: {e}")
+        try:
+            await bot_instance.shutdown()
+        except Exception as e:
+            logger.error(f"Error shutting down bot instance: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}", exc_info=True)
+        sys.exit(1)

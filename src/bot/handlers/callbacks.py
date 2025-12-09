@@ -259,7 +259,12 @@ async def engineer_fix_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if action == "fix":
         # Mark as used and reset failed rounds
         await bot_instance.db.update_player_field(game_id, user_id, "engineer_used_ability", True)
-        await bot_instance.game_state.reset_failed_rounds(game_id)  # Reset failed count
+        game = await bot_instance.db.get_game_by_id(game_id)
+        if game:
+            # Reset failed count by updating game settings
+            settings = game.settings or {}
+            settings['failed_task_rounds'] = 0
+            await bot_instance.db.update_game_settings(game_id, settings)
         await bot_instance.xp_system.award_xp(user_id, "engineer_saves_ship")
         await query.edit_message_text("⚙️ Ship systems fixed! Crisis averted!")
         
@@ -268,6 +273,10 @@ async def engineer_fix_callback(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         await query.edit_message_text("⚙️ You chose not to fix the ship.")
         await bot_instance.game_logger.log_engineer_action(game_id, user_id, False)
+
+async def engineer_day_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle engineer day actions (deprecated, but kept for backward compatibility)"""
+    await engineer_fix_callback(update, context)
 
 async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query

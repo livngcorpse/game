@@ -132,3 +132,12 @@ class GameState:
 
     def get_round_number(self, game_id: str) -> int:
         return self.round_numbers.get(game_id, 1)
+
+    async def reset_failed_rounds(self, game_id: str):
+        """Reset failed task rounds for a game"""
+        # Update the game settings to reset failed rounds
+        game = await db.get_game_by_id(game_id)
+        if game:
+            settings = game.settings or {}
+            settings['failed_task_rounds'] = 0
+            await db.update_game_settings(game_id, settings)

@@ -21,12 +21,12 @@ class WinConditions:
 
     @staticmethod
     async def check_ship_explosion(game_id: str) -> bool:
-        game = await db.get_game_by_group(0)
+        game = await db.get_game_by_id(game_id)
         if game and game.failed_task_rounds >= 2:
             players = await db.get_players(game_id)
             engineer = next((p for p in players if p.role == Role.ENGINEER and p.is_alive), None)
             
-            if not engineer or engineer.engineer_used_ability:
+            if not engineer or await db.get_player_field(game_id, engineer.user_id, "engineer_used_ability"):
                 return True
         
         return False
