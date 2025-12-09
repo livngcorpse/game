@@ -40,6 +40,9 @@ class TaskEngine:
                 assigned_task = self.active_tasks[game_id][user_id]
                 if assigned_task.get('task_id') != task_id:
                     return False
+                
+                # For brain-based tasks, we assume the correct button was pressed
+                # In a more advanced implementation, we could validate the actual answer
             
             await db.update_player_field(game_id, user_id, "completed_task", True)
             return True
