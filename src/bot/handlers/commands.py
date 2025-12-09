@@ -13,13 +13,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await bot_instance.db.create_user(user_id)
     
     await update.message.reply_text(
-        "🎮 Welcome to Among Us Bot!\n\nUse /help for more information.",
+        "🎮 Welcome to the Among Us Telegram Bot!\n\nPrepare for paranoia, deception, and questionable decision-making.",
         reply_markup=Keyboards.get_help_commands_keyboard()
     )
 
 async def startgame_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == 'private':
-        await update.message.reply_text("❌ Games can only be started in groups!")
+        await update.message.reply_text("❌ Games can only be started in groups! Don't be antisocial.")
         return
     
     group_id = update.effective_chat.id
@@ -31,7 +31,7 @@ async def startgame_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     existing_game = await bot_instance.game_state.get_game_by_group(group_id)
     if existing_game:
-        await update.message.reply_text("⚠️ A game is already active in this group!")
+        await update.message.reply_text("⚠️ A game is already brewing in this group! Patience, young sus player.")
         return
     
     mode_arg = context.args[0].lower() if context.args else None
@@ -40,7 +40,7 @@ async def startgame_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mode = GameMode.UNRANKED if mode_arg == "unranked" else GameMode.RANKED
     else:
         if mode_arg == "ranked":
-            await update.message.reply_text("❌ Ranked games are not allowed in this group!")
+            await update.message.reply_text("❌ Ranked games are not allowed in this group! Stick to casual chaos.")
             return
         mode = GameMode.UNRANKED
     
@@ -55,7 +55,7 @@ async def startgame_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == 'private':
-        await update.message.reply_text("❌ Use the join button in the group!")
+        await update.message.reply_text("❌ Use the join button in the group! Don't try to sneak in.")
         return
     
     group_id = update.effective_chat.id
@@ -72,7 +72,7 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if await bot_instance.game_state.join_game(game.id, user_id):
         try:
-            await bot_instance.bot.send_message(user_id, "✅ You joined the game! Wait for it to start.")
+            await bot_instance.bot.send_message(user_id, "✅ You've entered the chaos! Wait for the madness to begin.")
         except:
             await update.message.reply_text(Messages.get_dm_redirect_message())
             return
@@ -83,11 +83,11 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=Keyboards.get_join_game_keyboard(game.id)
         )
     else:
-        await update.message.reply_text("⚠️ Could not join game (already joined or game full)!")
+        await update.message.reply_text("⚠️ Could not join the sus circle (already joined or maximum capacity reached)!")
 
 async def begin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == 'private':
-        await update.message.reply_text("❌ This command only works in groups!")
+        await update.message.reply_text("❌ This command only works in groups! Don't be a lone wolf.")
         return
     
     group_id = update.effective_chat.id
@@ -99,12 +99,12 @@ async def begin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if user_id != game.creator_id:
-        await update.message.reply_text("❌ Only the game creator can force start!")
+        await update.message.reply_text("❌ Only the game creator can force start! Democracy has its limits.")
         return
     
     players = bot_instance.game_state.get_lobby_players(game.id)
     if len(players) < 4:
-        await update.message.reply_text("❌ Need at least 4 players to start!")
+        await update.message.reply_text("❌ Need at least 4 players to start the paranoia! Recruit more victims.")
         return
     
     await bot_instance.phase_manager.start_game_from_lobby(game.id, group_id)
@@ -112,7 +112,7 @@ async def begin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def end_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == 'private':
-        await update.message.reply_text("❌ This command only works in groups!")
+        await update.message.reply_text("❌ This command only works in groups! Don't end your loneliness here.")
         return
     
     group_id = update.effective_chat.id
@@ -128,17 +128,17 @@ async def end_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_creator = user_id == game.creator_id
     
     if not (is_admin or is_creator):
-        await update.message.reply_text("❌ Only admins or game creator can end the game!")
+        await update.message.reply_text("❌ Only admins or game creator can end the game! Power is everything.")
         return
     
     await bot_instance.phase_manager.cleanup_game_timers(game.id)
     await bot_instance.game_state.end_game(game.id)
-    await update.message.reply_text("🛑 Game ended by admin/creator.")
+    await update.message.reply_text("🛑 Game forcibly ended by admin/creator. The chaos has been stopped.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != 'private':
         await update.message.reply_text(
-            "📱 Help is available in DM only!",
+            "📱 Help is available in DM only! Even bots need privacy.",
             reply_markup=Keyboards.get_dm_redirect_keyboard()
         )
         return
@@ -152,7 +152,7 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _dm_only_command(update, "ℹ️ Game info available in DM!", "Game Information:\n\nAmong Us bot with roles, tasks, and XP system.")
 
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🏓 Pong! Bot is responsive.")
+    await update.message.reply_text("🏓 Pong! Bot is alive and ready to spread chaos.")
 
 async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _dm_only_command(update, "📋 About info available in DM!", "🤖 Among Us Telegram Bot\n\nDeveloped for group gameplay with full role system.")

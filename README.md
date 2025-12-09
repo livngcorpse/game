@@ -1,14 +1,15 @@
 # 🧠 Telegram Among Us Bot
 
-A feature-complete Telegram bot implementation of Among Us game mechanics for group chats.
+A feature-complete Telegram bot implementation of Among Us game mechanics for group chats with a healthy dose of sarcasm and suspense.
 
 ## 🚀 Features
 
-- **Full Game Logic**: Lobby, Night, Day, and Voting phases
+- **Full Game Logic**: Lobby, Night, Day, and Voting phases with suspenseful messaging
 - **5 Unique Roles**: Crewmate, Impostor, Detective, Sheriff, Engineer
 - **Ranked/Unranked Modes**: Group-based game modes
 - **XP & Achievement System**: Player progression and milestones
-- **Task System**: Interactive task completion mechanics
+- **Enhanced Task System**: 25+ brain-challenging interactive tasks
+- **Sarcastic Messaging**: Humorous and suspenseful bot responses throughout
 - **Admin Controls**: Ban system and game management
 - **Phase Timers**: Automatic game progression
 - **Database Persistence**: PostgreSQL with full state management
@@ -27,6 +28,7 @@ Edit `.env` file:
 ```env
 BOT_TOKEN=your_telegram_bot_token
 DATABASE_URL=postgresql://user:pass@localhost:5432/amongus
+BOT_USERNAME=your_bot_username
 RANKED_GC_IDS=123456789,987654321
 BOT_OWNER_ID=your_user_id
 GAME_LOG_CHANNEL_ID=log_channel_id
@@ -42,14 +44,37 @@ BOT_LOG_CHANNEL_ID=bot_log_channel_id
 | `/begin` | Force start game (creator only) |
 | `/end` | End game (admin/creator) |
 | `/help` | Show help menu |
+| `/stats` | View your XP and win streak |
 
 ## 🎭 Roles
 
-- **🔧 Crewmate**: Complete tasks, vote out impostors
+- **🔧 Crewmate**: Complete brain-challenging tasks, vote out impostors
 - **🔪 Impostor**: Eliminate crew, avoid detection  
 - **🕵️ Detective**: Investigate players for impostor status
 - **🔫 Sheriff**: Eliminate players (risky but powerful)
 - **⚙️ Engineer**: Fix ship when tasks fail
+
+## 🧠 Enhanced Task System
+
+The bot now features 25+ diverse brain-challenging tasks including:
+- Math sequences and logic puzzles
+- Word scrambles and anagrams
+- Pattern recognition challenges
+- Color sequence puzzles
+- Direction and spatial reasoning
+- Time calculation problems
+- Riddles and trivia questions
+- Among Us themed questions
+
+Each game presents randomly selected tasks, ensuring variety and replayability.
+
+## 😏 Sarcastic Messaging
+
+All bot messages are infused with humor and suspense:
+- Game events have witty commentary
+- Player actions receive snarky remarks
+- Phase transitions come with dramatic flair
+- Error messages maintain the theme
 
 ## 🏗️ Architecture
 
@@ -66,7 +91,7 @@ src/
 
 ## 🔧 Customization
 
-- **Tasks**: Edit `src/game/task_pool.py`
+- **Tasks**: Edit `src/game/task_pool.py` (25+ brain tasks available)
 - **Achievements**: Modify `src/systems/achievements.py`
 - **XP Values**: Adjust `src/utils/constants.py`
 - **Role Balance**: Update role distributions in constants

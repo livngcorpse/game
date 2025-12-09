@@ -17,7 +17,7 @@ class Database:
             self.pool = await asyncpg.create_pool(DATABASE_URL)
             await self._create_tables()
         except Exception as e:
-            print(f"Failed to connect to database: {e}")
+            print(f"🚨 Database connection failed! Is the server playing hide and seek? {e}")
             raise
 
     async def disconnect(self):
@@ -36,7 +36,7 @@ class Database:
         except (asyncpg.exceptions.ConnectionDoesNotExistError, 
                 asyncpg.exceptions.InterfaceError,
                 asyncpg.exceptions.InternalClientError):
-            print("Database connection lost. Attempting to reconnect...")
+            print("🔌 Database connection lost. Initiating emergency reconnection protocol...")
             await self.disconnect()
             await self.connect()
 
@@ -53,11 +53,11 @@ class Database:
                     asyncpg.exceptions.InternalClientError) as e:
                 last_exception = e
                 if attempt < self.max_retries - 1:
-                    print(f"Database connection error (attempt {attempt + 1}/{self.max_retries}): {e}")
+                    print(f"⚡ Database connection error (attempt {attempt + 1}/{self.max_retries}): {e} - Retrying because failure is not an option!")
                     await asyncio.sleep(self.retry_delay * (2 ** attempt))  # Exponential backoff
                     continue
                 else:
-                    print(f"Max retries reached. Database operation failed: {e}")
+                    print(f"💥 Max retries reached. Database operation failed: {e} - Even persistence has its limits!")
                     raise
             except Exception as e:
                 # For other exceptions, don't retry
@@ -145,7 +145,7 @@ class Database:
         try:
             return await self._execute_with_retry(_get_user)
         except Exception as e:
-            print(f"Error getting user {user_id}: {e}")
+            print(f"👤 Error getting user {user_id}: {e} - Did they vanish into the void?")
             return None
 
     async def create_user(self, user_id: int) -> User:
@@ -234,7 +234,7 @@ class Database:
         try:
             return await self._execute_with_retry(_get_game_by_group)
         except Exception as e:
-            print(f"Error getting game by group {group_id}: {e}")
+            print(f"🎮 Error getting game by group {group_id}: {e} - Game disappeared like a ghost!")
             return None
 
     async def get_game_by_id(self, game_id: str) -> Optional[Game]:
@@ -262,7 +262,7 @@ class Database:
         try:
             return await self._execute_with_retry(_get_game_by_id)
         except Exception as e:
-            print(f"Error getting game by ID {game_id}: {e}")
+            print(f"🆔 Error getting game by ID {game_id}: {e} - Game ID seems to be an illusion!")
             return None
 
     async def update_game_phase(self, game_id: str, phase: GamePhase):
@@ -323,7 +323,7 @@ class Database:
         try:
             return await self._execute_with_retry(_get_player)
         except Exception as e:
-            print(f"Error getting player {user_id} in game {game_id}: {e}")
+            print(f"👥 Error getting player {user_id} in game {game_id}: {e} - Player playing hide and seek?")
             return None
 
     async def get_players(self, game_id: str) -> List[Player]:

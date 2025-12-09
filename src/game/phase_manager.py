@@ -111,7 +111,7 @@ class PhaseManager:
         try:
             await self.bot.send_message(
                 group_id, 
-                Messages.get_night_phase_message(),
+                "🌙 The lights go out... Everyone close your eyes and pretend to sleep.\nRoles, prepare your sneaky business!",
                 reply_markup=Keyboards.get_dm_redirect_keyboard()
             )
         except Exception as e:
@@ -440,29 +440,31 @@ class PhaseManager:
         alive_players = await db.get_alive_players(game_id)
         alive_player_ids = [p.user_id for p in alive_players]
         
-        # Send day phase summary to group
+        # Create day phase message with night summary
         day_message = Messages.get_day_phase_message(alive_player_ids, night_summary)
+        
         try:
             await self.bot.send_message(group_id, day_message)
         except Exception as e:
             await self.game_logger.log_error(f"Can't send day phase message to group {group_id}", {"error": str(e)})
         
-        # Send detective findings privately
-        if night_summary.get("investigations"):
-            await self._send_detective_results(game_id, night_summary["investigations"])
+        # Check for ship explosion condition
+        game = await db.get_game_by_id(game_id)
+        if game and game.failed_task_rounds >= 3:
+            await self.end_game_explosion(game_id, group_id)
+            return
         
-        # Check if engineer needs to act (failed tasks)
-        if not night_summary["task_success"]:
+        # Check if engineer needs to fix the ship
+        if not night_summary["task_success"] and game:
             engineer_prompted = await self._prompt_engineer_if_needed(game_id)
-            # If engineer was prompted, start a shorter timer for their decision
             if engineer_prompted:
-                timer = asyncio.create_task(self._engineer_timeout(game_id, group_id))
-                self.engineer_timeouts[game_id] = timer
+                # Start 30-second timer for engineer decision
+                timeout_task = asyncio.create_task(self._engineer_timeout(game_id, group_id))
+                self.engineer_timeouts[game_id] = timeout_task
                 return
         
-        # Normal discussion timer
-        timer = asyncio.create_task(self._discussion_timeout(game_id, group_id))
-        self.phase_timers[game_id] = timer
+        # Continue to normal discussion phase
+        await self._continue_to_discussion(game_id, group_id)
 
     async def _engineer_timeout(self, game_id: str, group_id: int):
         """Handle timeout for engineer decision (30 seconds)"""
@@ -471,8 +473,16 @@ class PhaseManager:
         await self._continue_to_discussion(game_id, group_id)
     
     async def _continue_to_discussion(self, game_id: str, group_id: int):
-        """Continue to normal discussion phase after engineer timeout"""
-        # Start normal discussion timer
+        """Continue to normal discussion phase after engineer decision or if no engineer"""
+        try:
+            await self.bot.send_message(
+                group_id, 
+                "🗣️ Discussion time! Point fingers, throw accusations, and blame everyone except yourself.\nYou have 90 seconds of pure chaos."
+            )
+        except Exception as e:
+            await self.game_logger.log_error(f"Can't send discussion message to group {group_id}", {"error": str(e)})
+        
+        # Start discussion timer
         timer = asyncio.create_task(self._discussion_timeout(game_id, group_id))
         self.phase_timers[game_id] = timer
     
@@ -481,31 +491,34 @@ class PhaseManager:
         await self.start_voting_phase(game_id, group_id)
 
     async def start_voting_phase(self, game_id: str, group_id: int):
-        """Enhanced voting phase with DM keyboards"""
         await self.game_state.transition_phase(game_id, GamePhase.VOTING)
-        
-        # Send voting message to group
-        try:
-            await self.bot.send_message(group_id, Messages.get_voting_phase_message())
-        except Exception as e:
-            await self.game_logger.log_error(f"Can't send voting phase message to group {group_id}", {"error": str(e)})
-        
-        # Send voting keyboards to all alive players via DM
-        alive_players = await db.get_alive_players(game_id)
-        voting_keyboard = await Keyboards.get_voting_keyboard(game_id)
-        
-        for player in alive_players:
-            try:
-                await self.bot.send_message(
-                    player.user_id,
-                    "🗳️ Cast your vote:",
-                    reply_markup=voting_keyboard
-                )
-            except Exception as e:
-                await self.game_logger.log_error(f"Can't send vote to {player.user_id}", {"error": str(e)})
-        
         await self.game_logger.log_phase_transition(game_id, "discussion", "voting")
         
+        # Reset player votes
+        await db.reset_votes(game_id)
+        
+        try:
+            await self.bot.send_message(
+                group_id, 
+                "🗳️ Voting phase has begun! Choose wisely... or just point at someone random.\n30 seconds to make your decision."
+            )
+        except Exception as e:
+            await self.game_logger.log_error(f"Can't send voting message to group {group_id}", {"error": str(e)})
+        
+        # Send voting keyboards to all alive players
+        alive_players = await db.get_alive_players(game_id)
+        for player in alive_players:
+            try:
+                keyboard = await Keyboards.get_voting_keyboard(game_id, player.user_id)
+                await self.bot.send_message(
+                    player.user_id,
+                    "🗳️ Time to vote! Who's the most sus player?\nChoose carefully - your reputation depends on this.",
+                    reply_markup=keyboard
+                )
+            except Exception as e:
+                await self.game_logger.log_error(f"Can't send voting prompt to {player.user_id}", {"error": str(e)})
+        
+        # Start voting timer
         timer = asyncio.create_task(self._voting_timeout(game_id, group_id))
         self.phase_timers[game_id] = timer
 
@@ -621,35 +634,52 @@ class PhaseManager:
                     await self.game_logger.log_error(f"Can't send detective team reveal to {detective.user_id}", {"error": str(e)})
 
     async def _send_night_action_prompts(self, game_id: str):
-        """Send role-specific night action prompts"""
-        players = await db.get_players(game_id)
+        """Send role-specific action prompts via DM"""
+        game = await db.get_game_by_id(game_id)
+        if not game:
+            return
+            
+        players = await db.get_alive_players(game_id)
         
         for player in players:
-            if not player.is_alive:
-                continue
-                
             try:
                 if player.role == Role.IMPOSTOR:
-                    keyboard = await Keyboards.get_impostor_night_keyboard(game_id, player.user_id)
-                    await self.bot.send_message(
-                        player.user_id,
-                        "🔪 Choose your target:",
-                        reply_markup=keyboard
-                    )
-                elif player.role == Role.DETECTIVE:
-                    keyboard = await Keyboards.get_detective_night_keyboard(game_id, player.user_id)
-                    if keyboard:  # Only if can investigate this round
+                    # Handle impostor actions
+                    impostors = await db.get_players_by_role(game_id, Role.IMPOSTOR)
+                    alive_impostors = [imp for imp in impostors if imp.is_alive]
+                    
+                    if len(alive_impostors) == 1:
+                        # Solo impostor - direct kill action
+                        keyboard = await Keyboards.get_impostor_night_keyboard(game_id, player.user_id)
                         await self.bot.send_message(
                             player.user_id,
-                            "🕵️ Choose someone to investigate:",
+                            "🔪 You're the lone wolf tonight. Choose your victim wisely...",
                             reply_markup=keyboard
                         )
+                    else:
+                        # Multiple impostors - voting system
+                        keyboard = await Keyboards.get_impostor_night_keyboard(game_id, player.user_id)
+                        await self.bot.send_message(
+                            player.user_id,
+                            "🔪 Collaborate with your fellow impostors. Vote on tonight's victim:",
+                            reply_markup=keyboard
+                        )
+                        
+                elif player.role == Role.DETECTIVE:
+                    # Handle detective actions
+                    keyboard = await Keyboards.get_detective_night_keyboard(game_id, player.user_id)
+                    await self.bot.send_message(
+                        player.user_id,
+                        "🕵️ Time to investigate! Choose a player to scrutinize:",
+                        reply_markup=keyboard
+                    )
                 elif player.role == Role.SHERIFF:
+                    # Handle sheriff actions
                     if not await db.get_player_field(game_id, player.user_id, "sheriff_used_shot"):
                         keyboard = await Keyboards.get_sheriff_night_keyboard(game_id, player.user_id)
                         await self.bot.send_message(
                             player.user_id,
-                            "🔫 Choose your target (use wisely!):",
+                            "🔫 Choose your target carefully, Sheriff. One wrong move and it's game over:",
                             reply_markup=keyboard
                         )
                 elif player.role == Role.CREWMATE:
@@ -659,7 +689,7 @@ class PhaseManager:
                         keyboard = Keyboards.get_task_keyboard(game_id, player.user_id, task)
                         await self.bot.send_message(
                             player.user_id,
-                            f"🔧 Complete your task:\n{task['description']}",
+                            f"🔧 Your mission, should you choose to accept it:\n{task['description']}",
                             reply_markup=keyboard
                         )
             except Exception as e:
@@ -755,7 +785,11 @@ class PhaseManager:
                 await self.xp_system.award_xp(player.user_id, "loss")
         
         # Send victory message
-        victory_message = Messages.get_game_end_message(win_condition, winners)
+        if win_condition == "crewmates":
+            victory_message = "🎉 The forces of good have prevailed! Somehow the crewmates managed to not kill each other.\n\nWinners: " + ", ".join([f"Player {winner}" for winner in winners])
+        elif win_condition == "impostors":
+            victory_message = "🔪 Chaos wins again! The impostors have successfully sabotaged the mission.\n\nWinners: " + ", ".join([f"Player {winner}" for winner in winners])
+        
         try:
             await self.bot.send_message(group_id, victory_message)
         except Exception as e:
@@ -779,7 +813,7 @@ class PhaseManager:
         for player in players:
             await self.xp_system.deduct_xp(player.user_id, "ship_explodes")
         
-        explosion_message = Messages.get_game_end_message("explosion", [])
+        explosion_message = "💥 Well, that's what happens when you don't do your tasks! The ship has exploded and everyone loses.\n\nBetter luck next time, or maybe just do your job?"
         try:
             await self.bot.send_message(group_id, explosion_message)
         except Exception as e:

@@ -290,13 +290,13 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_type = query.data.split("_")[1]
     
     messages = {
-        "rules": "📜 **Game Rules:**\n\n• Find and vote out all impostors to win\n• Complete tasks when assigned\n• Use your role's special abilities wisely\n• Discussion phase: talk strategy\n• Voting phase: vote out suspicious players",
+        "rules": "📜 **Game Rules (Try to Follow Them):**\n\n• Find and eject all impostors before they sabotage everything\n• Complete your assigned tasks (yes, they matter)\n• Use your role's special powers wisely (or wildly)\n• Discussion phase: Blame everyone except yourself\n• Voting phase: Point at the most sus player",
         
-        "roles": "🎭 **Roles Guide:**\n\n🟦 **Crewmate**: Complete tasks, vote out impostors\n🔴 **Impostor**: Kill crewmates, blend in\n🕵️ **Detective**: Find impostors through investigation\n🔫 **Sheriff**: Eliminate players (beware friendly fire!)\n⚙️ **Engineer**: Fix ship when tasks fail",
+        "roles": "🎭 **Roles Guide (Know Your Fate):**\n\n🟦 **Crewmate**: Do tasks, vote impostors, try not to die\n🔴 **Impostor**: Kill crewmates, fake tasks, don't get caught\n🕵️ **Detective**: Investigate players, keep findings secret\n🔫 **Sheriff**: Shoot players, hope you don't miss\n⚙️ **Engineer**: Fix ship when tasks fail, save everyone's behinds",
         
-        "commands": "📋 **Commands:**\n\n🎮 **Game Commands:**\n• `/startgame [ranked/unranked]` - Create new game\n• `/join` - Join active game\n• `/begin` - Force start (creator only)\n• `/end` - End game (admin/creator only)\n\n📱 **Utility:**\n• `/help` - Show this help\n• `/ping` - Test bot\n• `/stats` - Your game statistics",
+        "commands": "📋 **Commands (Your Survival Toolkit):**\n\n🎮 **Game Commands:**\n• `/startgame [ranked/unranked]` - Summon a new game\n• `/join` - Enter the chaos\n• `/begin` - Force start (creator only)\n• `/end` - End game (admin/creator only)\n\n📱 **Utility:**\n• `/help` - This existential crisis\n• `/ping` - Check if bot is still alive\n• `/stats` - See your sus profile",
         
-        "about": "🤖 **About This Bot:**\n\nAmong Us Telegram Bot v2.0\n\n• Supports 4-20 players\n• Ranked and unranked modes\n• Full role system with special abilities\n• XP and achievement system\n• Developed with ❤️ for group gameplay\n\n🔗 GitHub: [Repository Link]\n👨‍💻 Developer: [Your Name]"
+        "about": "🤖 **About This Bot (The Magic Behind the Chaos):**\n\nAmong Us Telegram Bot v2.0 - Where Paranoia Meets Convenience\n\n• Supports 4-20 players (the bigger the chaos, the better)\n• Ranked and unranked modes (for competitive sus behavior)\n• Full role system with special abilities (everyone's special!)\n• XP and achievement system (gamify your paranoia)\n• Developed with ❤️ for group gameplay (and drama)\n\n🔗 GitHub: [Repository Link]\n👨‍💻 Developer: [Your Name]"
     }
     
     await query.edit_message_text(
