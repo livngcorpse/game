@@ -34,6 +34,13 @@ def setup_handlers(application):
     for handler in callback_handlers:
         application.add_handler(handler)
     
+    # Add team chat handler for impostors and detectives
+    team_chat_handler = MessageHandler(
+        filters.TEXT & filters.ChatType.PRIVATE,
+        callbacks.team_chat_callback
+    )
+    application.add_handler(team_chat_handler)
+    
     message_handler = MessageHandler(
         filters.Regex(f"^({prefixes})(startgame|join|begin|end|help|info|ping|about|report|feedback|roles|rules)"),
         _handle_prefixed_commands

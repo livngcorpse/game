@@ -273,6 +273,11 @@ async def engineer_fix_callback(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         await query.edit_message_text("⚙️ You chose not to fix the ship.")
         await bot_instance.game_logger.log_engineer_action(game_id, user_id, False)
+    
+    # Continue to normal discussion phase
+    game = await bot_instance.db.get_game_by_id(game_id)
+    if game:
+        await bot_instance.phase_manager._continue_to_discussion(game_id, game.group_id)
 
 async def engineer_day_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle engineer day actions (deprecated, but kept for backward compatibility)"""
@@ -330,6 +335,28 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         # Handle unknown callbacks gracefully
         await query.answer("❌ Unknown action!", show_alert=True)
+
+async def team_chat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle team chat messages for impostors and detectives"""
+    message = update.message
+    user_id = message.from_user.id
+    chat_text = message.text
+    
+    # Get the current game for this user
+    game = await bot_instance.game_state.get_game_by_group(message.chat.id)
+    if not game:
+        return
+    
+    # Check if user is in the game
+    player = await bot_instance.db.get_player(game.id, user_id)
+    if not player or not player.is_alive:
+        return
+    
+    # Relay message to teammates based on role
+    if player.role == Role.IMPOSTOR:
+        await bot_instance.phase_manager.relay_team_message(game.id, user_id, chat_text, Role.IMPOSTOR)
+    elif player.role == Role.DETECTIVE:
+        await bot_instance.phase_manager.relay_team_message(game.id, user_id, chat_text, Role.DETECTIVE)
 
 # DEPRECATED: Remove this old generic handler
 # async def night_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

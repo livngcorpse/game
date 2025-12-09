@@ -93,6 +93,13 @@ class GameState:
             await db.reset_votes(game_id)
             await db.reset_tasks(game_id)
             self.round_numbers[game_id] = self.round_numbers.get(game_id, 0) + 1
+            
+            # Persist round number to database
+            game = await db.get_game_by_id(game_id)
+            if game:
+                settings = game.settings or {}
+                settings['round_number'] = self.round_numbers[game_id]
+                await db.update_game_settings(game_id, settings)
 
     def get_lobby_players(self, game_id: str) -> List[int]:
         return self.lobby_players.get(game_id, [])
@@ -103,32 +110,40 @@ class GameState:
         
         self.voting_data[game_id][voter_id] = target_id
         await db.mark_voted(game_id, voter_id)
+        
+        # Record vote in database for persistence
+        round_number = self.round_numbers.get(game_id, 1)
+        await db.record_vote(game_id, voter_id, target_id, round_number)
 
     async def resolve_votes(self, game_id: str) -> Dict[str, Any]:
-        if game_id not in self.voting_data:
-            return {"ejected": None, "votes": {}}
-        
-        votes = self.voting_data[game_id]
-        vote_counts = {}
-        
-        for target in votes.values():
-            if target is not None:
-                vote_counts[target] = vote_counts.get(target, 0) + 1
+        # Use database for vote counting to ensure persistence
+        round_number = self.round_numbers.get(game_id, 1)
+        vote_counts = await db.get_vote_results(game_id, round_number)
         
         if not vote_counts:
             return {"ejected": None, "votes": vote_counts}
         
-        max_votes = max(vote_counts.values())
-        winners = [target for target, count in vote_counts.items() if count == max_votes]
+        # Convert -1 (skip votes) back to None for processing
+        processed_votes = {}
+        for target, count in vote_counts.items():
+            processed_votes[target if target != -1 else None] = count
         
-        ejected = None if len(winners) > 1 else winners[0]
+        if not processed_votes:
+            return {"ejected": None, "votes": processed_votes}
+        
+        max_votes = max(processed_votes.values())
+        winners = [target for target, count in processed_votes.items() if count == max_votes]
+        
+        # If there's a tie or no votes, no one gets ejected
+        ejected = None if len(winners) > 1 or (len(winners) == 1 and winners[0] is None) else winners[0]
         
         if ejected:
             await db.kill_player(game_id, ejected)
         
+        # Clear in-memory voting data
         self.voting_data[game_id] = {}
         
-        return {"ejected": ejected, "votes": vote_counts}
+        return {"ejected": ejected, "votes": processed_votes}
 
     def get_round_number(self, game_id: str) -> int:
         return self.round_numbers.get(game_id, 1)

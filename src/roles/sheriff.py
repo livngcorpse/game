@@ -9,9 +9,10 @@ class Sheriff(BaseRole):
         super().__init__(user_id, game_id)
 
     async def get_night_action_keyboard(self) -> InlineKeyboardMarkup:
-        player = await db.get_player(self.game_id, self.user_id)
+        # Check if sheriff already used their shot
+        sheriff_used_shot = await db.get_player_field(self.game_id, self.user_id, "sheriff_used_shot")
         
-        if player.sheriff_shots_used == 0:
+        if not sheriff_used_shot:
             players = await db.get_players(self.game_id)
             alive_players = [p for p in players if p.is_alive and p.user_id != self.user_id]
             
@@ -51,7 +52,7 @@ class Sheriff(BaseRole):
         
         if target_player.role == Role.IMPOSTOR:
             await db.kill_player(self.game_id, target_id)
-            await db.update_player_field(self.game_id, self.user_id, "sheriff_shots_used", 1)
+            await db.update_player_field(self.game_id, self.user_id, "sheriff_used_shot", True)
             
             return {
                 "action": "successful_shot",
@@ -62,7 +63,7 @@ class Sheriff(BaseRole):
         else:
             await db.kill_player(self.game_id, target_id)
             await db.kill_player(self.game_id, self.user_id)
-            await db.update_player_field(self.game_id, self.user_id, "sheriff_shots_used", 1)
+            await db.update_player_field(self.game_id, self.user_id, "sheriff_used_shot", True)
             
             return {
                 "action": "friendly_fire",

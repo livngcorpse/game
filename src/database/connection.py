@@ -394,25 +394,4 @@ class Database:
             return {row['target_id'] or -1: row['vote_count'] for row in rows}  # -1 for skip votes    # For now, return empty list
         return []
 
-async def get_game_round(self, game_id: str) -> int:
-    """Get current round number for a game"""
-    async with self.pool.acquire() as conn:
-        # You might want to add a round_number field to games table
-        # For now, calculate based on game duration or add to game settings
-        row = await conn.fetchrow(
-            "SELECT settings FROM games WHERE id = $1",
-            game_id
-        )
-        if row and row['settings']:
-            return row['settings'].get('round_number', 1)
-        return 1
-
-async def update_game_settings(self, game_id: str, settings: Dict[str, Any]):
-    """Update game settings JSON field"""
-    async with self.pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE games SET settings = $1 WHERE id = $2",
-            json.dumps(settings), game_id
-        )
-
 db = Database()

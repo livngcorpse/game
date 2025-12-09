@@ -35,6 +35,12 @@ class TaskEngine:
 
     async def complete_task(self, game_id: str, user_id: int, task_id: str = None) -> bool:
         if game_id in self.active_tasks and user_id in self.active_tasks[game_id]:
+            # If task_id is provided, validate it matches the assigned task
+            if task_id:
+                assigned_task = self.active_tasks[game_id][user_id]
+                if assigned_task.get('task_id') != task_id:
+                    return False
+            
             await db.update_player_field(game_id, user_id, "completed_task", True)
             return True
         return False

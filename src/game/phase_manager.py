@@ -25,6 +25,7 @@ class PhaseManager:
         self.night_actions: Dict[str, Dict[int, Dict[str, Any]]] = {}
         self.impostor_votes: Dict[str, Dict[int, Optional[int]]] = {}
         self.detective_votes: Dict[str, Dict[int, Optional[int]]] = {}
+        self.engineer_timeouts: Dict[str, asyncio.Task] = {}
 
     async def start_lobby_timer(self, game_id: str, group_id: int):
         timer = asyncio.create_task(self._lobby_timeout(game_id, group_id))
@@ -67,6 +68,8 @@ class PhaseManager:
             # Clean up the game state
             try:
                 await self.game_state.end_game(game_id)
+                # Clean up timers
+                await self.cleanup_game_timers(game_id)
             except:
                 pass
 
@@ -84,6 +87,7 @@ class PhaseManager:
         
         await self.game_state.end_game(game_id)
         
+        # Clean up timers
         if game_id in self.phase_timers:
             self.phase_timers[game_id].cancel()
             del self.phase_timers[game_id]
@@ -144,6 +148,8 @@ class PhaseManager:
             # Try to end the game gracefully
             try:
                 await self.game_state.end_game(game_id)
+                # Clean up timers
+                await self.cleanup_game_timers(game_id)
             except Exception as end_game_error:
                 await self.game_logger.log_error(f"Error ending game after night action failure: {end_game_error}", {"game_id": game_id})
 
@@ -320,6 +326,10 @@ class PhaseManager:
                     })
                     await self.xp_system.award_xp(detective_id, "detective_investigation")
                     await self.game_logger.log_detective_investigation(game_id, detective_id, target_id, result)
+                    
+                    # Update detective's last investigation round
+                    round_number = self.game_state.get_round_number(game_id)
+                    await db.update_player_field(game_id, detective_id, "detective_last_investigation", round_number)
         else:
             # Multiple detectives - must coordinate
             votes = self.detective_votes.get(game_id, {})
@@ -337,6 +347,10 @@ class PhaseManager:
                                 "result": result
                             })
                             await self.xp_system.award_xp(det_id, "detective_investigation")
+                            
+                            # Update detective's last investigation round
+                            round_number = self.game_state.get_round_number(game_id)
+                            await db.update_player_field(game_id, det_id, "detective_last_investigation", round_number)
                         await self.game_logger.log_detective_investigation(game_id, 0, target_id, result)
         
         return {"findings": findings}
@@ -430,11 +444,29 @@ class PhaseManager:
         
         # Check if engineer needs to act (failed tasks)
         if not night_summary["task_success"]:
-            await self._prompt_engineer_if_needed(game_id)
+            engineer_prompted = await self._prompt_engineer_if_needed(game_id)
+            # If engineer was prompted, start a shorter timer for their decision
+            if engineer_prompted:
+                timer = asyncio.create_task(self._engineer_timeout(game_id, group_id))
+                self.engineer_timeouts[game_id] = timer
+                return
         
+        # Normal discussion timer
         timer = asyncio.create_task(self._discussion_timeout(game_id, group_id))
         self.phase_timers[game_id] = timer
 
+    async def _engineer_timeout(self, game_id: str, group_id: int):
+        """Handle timeout for engineer decision (30 seconds)"""
+        await asyncio.sleep(30)  # Engineer gets 30 seconds to decide
+        # After timeout, proceed to normal discussion phase
+        await self._continue_to_discussion(game_id, group_id)
+    
+    async def _continue_to_discussion(self, game_id: str, group_id: int):
+        """Continue to normal discussion phase after engineer timeout"""
+        # Start normal discussion timer
+        timer = asyncio.create_task(self._discussion_timeout(game_id, group_id))
+        self.phase_timers[game_id] = timer
+    
     async def _discussion_timeout(self, game_id: str, group_id: int):
         await asyncio.sleep(DISCUSSION_DURATION)
         await self.start_voting_phase(game_id, group_id)
@@ -470,26 +502,23 @@ class PhaseManager:
         await self.resolve_voting(game_id, group_id)
 
     async def resolve_voting(self, game_id: str, group_id: int):
-        """Enhanced voting resolution with detailed results"""
+        """Enhanced voting resolution with proper win condition checking"""
         try:
             # Apply AFK penalties for players who didn't vote
             await self._apply_voting_afk_penalties(game_id)
             
             vote_result = await self.game_state.resolve_votes(game_id)
             
-            # Announce voting results in group
+            # Send voting results to group
             if vote_result["ejected"]:
-                ejected_player = await db.get_player(game_id, vote_result["ejected"])
-                result_message = Messages.get_voting_result_message(
-                    vote_result["ejected"], 
-                    ejected_player.role.value
-                )
-                await self.bot.send_message(group_id, result_message)
-                await self.game_logger.log_vote(game_id, 0, vote_result["ejected"])
-                
-                # Award XP for correct votes
-                if ejected_player.role == Role.IMPOSTOR:
-                    voters = await db.get_voters_for_target(game_id, vote_result["ejected"])
+                ejected_player = vote_result["ejected"]
+                player = await db.get_player(game_id, ejected_player)
+                if player:
+                    result_message = Messages.get_voting_result_message(ejected_player, player.role.value)
+                    await self.bot.send_message(group_id, result_message)
+                    
+                    # Award XP to correct voters
+                    voters = await db.get_voters_for_target(game_id, ejected_player)
                     for voter_id in voters:
                         await self.xp_system.award_xp(voter_id, "correct_vote")
             else:
@@ -513,6 +542,8 @@ class PhaseManager:
             # Try to end the game gracefully
             try:
                 await self.game_state.end_game(game_id)
+                # Clean up timers
+                await self.cleanup_game_timers(game_id)
             except Exception as end_game_error:
                 await self.game_logger.log_error(f"Error ending game after voting failure: {end_game_error}", {"game_id": game_id})
 
@@ -529,9 +560,14 @@ class PhaseManager:
                 await self.xp_system.deduct_xp(player.user_id, "afk")
 
     async def _send_role_assignments(self, game_id: str):
-        """Send role assignments via DM"""
+        """Send role assignments via DM with team reveals"""
         players = await db.get_players(game_id)
         
+        # Group players by role for team reveals
+        impostors = [p for p in players if p.role == Role.IMPOSTOR]
+        detectives = [p for p in players if p.role == Role.DETECTIVE]
+        
+        # Send individual role assignments
         for player in players:
             try:
                 role_message = Messages.get_role_assignment_message(
@@ -541,6 +577,27 @@ class PhaseManager:
                 await self.bot.send_message(player.user_id, role_message)
             except Exception as e:
                 await self.game_logger.log_error(f"Can't send role to {player.user_id}", {"error": str(e)})
+        
+        # Send team reveal messages
+        # Impostors know each other if there are 2 or more
+        if len(impostors) >= 2:
+            impostor_ids = [str(p.user_id) for p in impostors]
+            team_message = f"👥 You know each other! Other impostors: {', '.join(impostor_ids)}"
+            for impostor in impostors:
+                try:
+                    await self.bot.send_message(impostor.user_id, team_message)
+                except Exception as e:
+                    await self.game_logger.log_error(f"Can't send impostor team reveal to {impostor.user_id}", {"error": str(e)})
+        
+        # Detectives know each other if there are 2
+        if len(detectives) >= 2:
+            detective_ids = [str(p.user_id) for p in detectives]
+            team_message = f"👥 You know each other! Other detectives: {', '.join(detective_ids)}"
+            for detective in detectives:
+                try:
+                    await self.bot.send_message(detective.user_id, team_message)
+                except Exception as e:
+                    await self.game_logger.log_error(f"Can't send detective team reveal to {detective.user_id}", {"error": str(e)})
 
     async def _send_night_action_prompts(self, game_id: str):
         """Send role-specific night action prompts"""
@@ -599,7 +656,7 @@ class PhaseManager:
             except Exception as e:
                 await self.game_logger.log_error(f"Can't send detective result to {finding['detective_id']}", {"error": str(e)})
 
-    async def _prompt_engineer_if_needed(self, game_id: str):
+    async def _prompt_engineer_if_needed(self, game_id: str) -> bool:
         """Send engineer the fix/skip choice if tasks failed"""
         engineers = await db.get_players_by_role(game_id, Role.ENGINEER)
         
@@ -615,11 +672,14 @@ class PhaseManager:
                 keyboard = Keyboards.get_engineer_day_keyboard(game_id)
                 await self.bot.send_message(
                     engineer.user_id,
-                    "⚙️ Tasks failed! Fix the ship?",
+                    "⚙️ Tasks failed! Fix the ship? (You have 30 seconds to decide)",
                     reply_markup=keyboard
                 )
+                return True  # Engineer was prompted
             except Exception as e:
                 await self.game_logger.log_error(f"Can't send engineer prompt to {engineer.user_id}", {"error": str(e)})
+        
+        return False  # No engineer was prompted
 
     # Action processing methods for callbacks
     async def process_impostor_action(self, game_id: str, user_id: int, action_type: str, target_id: Optional[int]) -> Dict[str, Any]:
@@ -685,9 +745,8 @@ class PhaseManager:
         
         await self.game_logger.log_game_end(game_id, win_condition, duration, player_names)
         
-        if game_id in self.phase_timers:
-            self.phase_timers[game_id].cancel()
-            del self.phase_timers[game_id]
+        # Clean up timers
+        await self.cleanup_game_timers(game_id)
 
     async def end_game_explosion(self, game_id: str, group_id: int):
         players = await db.get_players(game_id)
@@ -706,9 +765,8 @@ class PhaseManager:
         
         await self.game_logger.log_game_end(game_id, "explosion", duration, player_names)
         
-        if game_id in self.phase_timers:
-            self.phase_timers[game_id].cancel()
-            del self.phase_timers[game_id]
+        # Clean up timers
+        await self.cleanup_game_timers(game_id)
 
     async def record_night_action(self, game_id: str, user_id: int, role: str, action_data: Dict[str, Any]):
         """Record night action (legacy method for compatibility)"""
@@ -720,6 +778,22 @@ class PhaseManager:
             **action_data
         }
 
+    async def relay_team_message(self, game_id: str, sender_id: int, message: str, role: Role):
+        """Relay messages between team members (impostors/detectives)"""
+        # Get all players with the same role
+        players = await db.get_players_by_role(game_id, role)
+        teammates = [p for p in players if p.is_alive and p.user_id != sender_id]
+        
+        # Relay message to teammates
+        for teammate in teammates:
+            try:
+                await self.bot.send_message(
+                    teammate.user_id, 
+                    f"👥 Team message from Player {sender_id}:\n{message}"
+                )
+            except Exception as e:
+                await self.game_logger.log_error(f"Can't relay team message to {teammate.user_id}", {"error": str(e)})
+    
     async def cleanup_game_timers(self, game_id: str):
         """Enhanced cleanup with better error handling"""
         if game_id in self.phase_timers:
@@ -739,3 +813,14 @@ class PhaseManager:
             del self.impostor_votes[game_id]
         if game_id in self.detective_votes:
             del self.detective_votes[game_id]
+            
+        # Also clean up any engineer timeouts
+        if game_id in self.engineer_timeouts:
+            timeout_task = self.engineer_timeouts[game_id]
+            if not timeout_task.done():
+                timeout_task.cancel()
+                try:
+                    await timeout_task
+                except asyncio.CancelledError:
+                    pass
+            del self.engineer_timeouts[game_id]
