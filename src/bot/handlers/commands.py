@@ -169,6 +169,19 @@ async def roles_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def rules_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _dm_only_command(update, "📜 Rules available in DM!", "📜 Game Rules:\n\n• Complete tasks or find impostors\n• Vote out suspicious players\n• Special roles have unique abilities")
 
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show user statistics including XP and streak"""
+    user_id = update.effective_user.id
+    
+    # Ensure user exists in database
+    user = await bot_instance.db.get_user(user_id)
+    if not user:
+        user = await bot_instance.db.create_user(user_id)
+    
+    # Send stats message
+    stats_message = Messages.get_user_stats_message(user_id, user.xp, user.streak)
+    await _dm_only_command(update, "📊 Your stats available in DM!", stats_message)
+
 async def _dm_only_command(update: Update, group_message: str, dm_message: str):
     if update.effective_chat.type != 'private':
         await update.message.reply_text(

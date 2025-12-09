@@ -19,6 +19,7 @@ def setup_handlers(application):
         CommandHandler(["feedback"], commands.feedback_command),
         CommandHandler(["roles"], commands.roles_command),
         CommandHandler(["rules"], commands.rules_command),
+        CommandHandler(["stats"], commands.stats_command),
         CommandHandler(["xban"], admin.xban_command),
         CommandHandler(["xunban"], admin.xunban_command),
         CommandHandler(["setxp"], admin.setxp_command),
@@ -42,7 +43,7 @@ def setup_handlers(application):
     application.add_handler(team_chat_handler)
     
     message_handler = MessageHandler(
-        filters.Regex(f"^({prefixes})(startgame|join|begin|end|help|info|ping|about|report|feedback|roles|rules)"),
+        filters.Regex(f"^({prefixes})(startgame|join|begin|end|help|info|ping|about|report|feedback|roles|rules|stats)"),
         _handle_prefixed_commands
     )
     application.add_handler(message_handler)
@@ -69,6 +70,7 @@ async def _handle_prefixed_commands(update, context):
                 "feedback": commands.feedback_command,
                 "roles": commands.roles_command,
                 "rules": commands.rules_command,
+                "stats": commands.stats_command,
             }
             
             handler = command_map.get(command)

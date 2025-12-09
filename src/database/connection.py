@@ -1,5 +1,6 @@
 import asyncpg
 import json
+import asyncio
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from src.utils.config import DATABASE_URL
@@ -8,6 +9,8 @@ from src.database.models import User, Game, Player, Ban, GameMode, GamePhase, Ro
 class Database:
     def __init__(self):
         self.pool: Optional[asyncpg.Pool] = None
+        self.max_retries = 5
+        self.retry_delay = 2  # seconds
 
     async def connect(self):
         try:
@@ -20,6 +23,47 @@ class Database:
     async def disconnect(self):
         if self.pool:
             await self.pool.close()
+
+    async def _reconnect_if_needed(self):
+        """Attempt to reconnect to database if connection is lost"""
+        if not self.pool:
+            return await self.connect()
+            
+        try:
+            # Test connection with a simple query
+            async with self.pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+        except (asyncpg.exceptions.ConnectionDoesNotExistError, 
+                asyncpg.exceptions.InterfaceError,
+                asyncpg.exceptions.InternalClientError):
+            print("Database connection lost. Attempting to reconnect...")
+            await self.disconnect()
+            await self.connect()
+
+    async def _execute_with_retry(self, func, *args, **kwargs):
+        """Execute a database operation with retry logic"""
+        last_exception = None
+        
+        for attempt in range(self.max_retries):
+            try:
+                await self._reconnect_if_needed()
+                return await func(*args, **kwargs)
+            except (asyncpg.exceptions.ConnectionDoesNotExistError, 
+                    asyncpg.exceptions.InterfaceError,
+                    asyncpg.exceptions.InternalClientError) as e:
+                last_exception = e
+                if attempt < self.max_retries - 1:
+                    print(f"Database connection error (attempt {attempt + 1}/{self.max_retries}): {e}")
+                    await asyncio.sleep(self.retry_delay * (2 ** attempt))  # Exponential backoff
+                    continue
+                else:
+                    print(f"Max retries reached. Database operation failed: {e}")
+                    raise
+            except Exception as e:
+                # For other exceptions, don't retry
+                raise
+        
+        raise last_exception
 
     async def _create_tables(self):
         async with self.pool.acquire() as conn:
@@ -84,33 +128,46 @@ class Database:
             """)
 
     async def get_user(self, user_id: int) -> Optional[User]:
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
-            if row:
-                return User(
-                    id=row['id'],
-                    xp=row['xp'],
-                    is_banned=row['is_banned'],
-                    ban_expiry=row['ban_expiry'],
-                    streak=row['streak'],
-                    achievements=row['achievements'] or {}
-                )
+        async def _get_user():
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+                if row:
+                    return User(
+                        id=row['id'],
+                        xp=row['xp'],
+                        is_banned=row['is_banned'],
+                        ban_expiry=row['ban_expiry'],
+                        streak=row['streak'],
+                        achievements=row['achievements'] or {}
+                    )
+                return None
+        
+        try:
+            return await self._execute_with_retry(_get_user)
+        except Exception as e:
+            print(f"Error getting user {user_id}: {e}")
             return None
 
     async def create_user(self, user_id: int) -> User:
-        async with self.pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING",
-                user_id
-            )
-            return await self.get_user(user_id)
+        async def _create_user():
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING",
+                    user_id
+                )
+                return await self.get_user(user_id)
+        
+        return await self._execute_with_retry(_create_user)
 
     async def update_user_xp(self, user_id: int, xp_change: int):
-        async with self.pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE users SET xp = xp + $1 WHERE id = $2",
-                xp_change, user_id
-            )
+        async def _update_user_xp():
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET xp = xp + $1 WHERE id = $2",
+                    xp_change, user_id
+                )
+        
+        await self._execute_with_retry(_update_user_xp)
 
     async def update_user_streak(self, user_id: int, streak: int):
         async with self.pool.acquire() as conn:
@@ -154,52 +211,69 @@ class Database:
             return game
 
     async def get_game_by_group(self, group_id: int) -> Optional[Game]:
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM games WHERE group_id = $1 AND phase != 'ended' ORDER BY start_time DESC LIMIT 1",
-                group_id
-            )
-            if row:
-                return Game(
-                    id=row['id'],
-                    mode=GameMode(row['mode']),
-                    group_id=row['group_id'],
-                    phase=GamePhase(row['phase']),
-                    start_time=row['start_time'],
-                    end_time=row['end_time'],
-                    creator_id=row['creator_id'],
-                    failed_task_rounds=row['failed_task_rounds'],
-                    settings=row['settings'] or {}
+        async def _get_game_by_group():
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM games WHERE group_id = $1 AND phase != 'ended' ORDER BY start_time DESC LIMIT 1",
+                    group_id
                 )
+                if row:
+                    return Game(
+                        id=row['id'],
+                        mode=GameMode(row['mode']),
+                        group_id=row['group_id'],
+                        phase=GamePhase(row['phase']),
+                        start_time=row['start_time'],
+                        end_time=row['end_time'],
+                        creator_id=row['creator_id'],
+                        failed_task_rounds=row['failed_task_rounds'],
+                        settings=row['settings'] or {}
+                    )
+                return None
+        
+        try:
+            return await self._execute_with_retry(_get_game_by_group)
+        except Exception as e:
+            print(f"Error getting game by group {group_id}: {e}")
             return None
 
     async def get_game_by_id(self, game_id: str) -> Optional[Game]:
         """Get game by its ID instead of group ID"""
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM games WHERE id = $1",
-                game_id
-            )
-            if row:
-                return Game(
-                    id=row['id'],
-                    mode=GameMode(row['mode']),
-                    group_id=row['group_id'],
-                    phase=GamePhase(row['phase']),
-                    start_time=row['start_time'],
-                    end_time=row['end_time'],
-                    creator_id=row['creator_id'],
-                    failed_task_rounds=row['failed_task_rounds'],
-                    settings=row['settings'] or {}
+        async def _get_game_by_id():
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM games WHERE id = $1",
+                    game_id
                 )
+                if row:
+                    return Game(
+                        id=row['id'],
+                        mode=GameMode(row['mode']),
+                        group_id=row['group_id'],
+                        phase=GamePhase(row['phase']),
+                        start_time=row['start_time'],
+                        end_time=row['end_time'],
+                        creator_id=row['creator_id'],
+                        failed_task_rounds=row['failed_task_rounds'],
+                        settings=row['settings'] or {}
+                    )
+                return None
+        
+        try:
+            return await self._execute_with_retry(_get_game_by_id)
+        except Exception as e:
+            print(f"Error getting game by ID {game_id}: {e}")
             return None
 
     async def update_game_phase(self, game_id: str, phase: GamePhase):
-        async with self.pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE games SET phase = $1 WHERE id = $2",
-                phase.value, game_id
-            )
+        async def _update_game_phase():
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE games SET phase = $1 WHERE id = $2",
+                    phase.value, game_id
+                )
+        
+        await self._execute_with_retry(_update_game_phase)
 
     async def end_game(self, game_id: str):
         async with self.pool.acquire() as conn:
@@ -216,30 +290,40 @@ class Database:
             )
 
     async def add_player(self, player: Player):
-        async with self.pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO players (game_id, user_id, role, sheriff_used_shot, detective_last_investigation, engineer_used_ability) VALUES ($1, $2, $3, $4, $5, $6)",
-                player.game_id, player.user_id, player.role.value, player.sheriff_used_shot, player.detective_last_investigation, player.engineer_used_ability
-            )
+        async def _add_player():
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO players (game_id, user_id, role, sheriff_used_shot, detective_last_investigation, engineer_used_ability) VALUES ($1, $2, $3, $4, $5, $6)",
+                    player.game_id, player.user_id, player.role.value, player.sheriff_used_shot, player.detective_last_investigation, player.engineer_used_ability
+                )
+        
+        await self._execute_with_retry(_add_player)
 
     async def get_player(self, game_id: str, user_id: int) -> Optional[Player]:
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM players WHERE game_id = $1 AND user_id = $2",
-                game_id, user_id
-            )
-            if row:
-                return Player(
-                    game_id=row['game_id'],
-                    user_id=row['user_id'],
-                    role=Role(row['role']),
-                    is_alive=row['is_alive'],
-                    voted=row['voted'],
-                    completed_task=row['completed_task'],
-                    sheriff_used_shot=row['sheriff_used_shot'],
-                    detective_last_investigation=row['detective_last_investigation'],
-                    engineer_used_ability=row['engineer_used_ability']
+        async def _get_player():
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM players WHERE game_id = $1 AND user_id = $2",
+                    game_id, user_id
                 )
+                if row:
+                    return Player(
+                        game_id=row['game_id'],
+                        user_id=row['user_id'],
+                        role=Role(row['role']),
+                        is_alive=row['is_alive'],
+                        voted=row['voted'],
+                        completed_task=row['completed_task'],
+                        sheriff_used_shot=row['sheriff_used_shot'],
+                        detective_last_investigation=row['detective_last_investigation'],
+                        engineer_used_ability=row['engineer_used_ability']
+                    )
+                return None
+        
+        try:
+            return await self._execute_with_retry(_get_player)
+        except Exception as e:
+            print(f"Error getting player {user_id} in game {game_id}: {e}")
             return None
 
     async def get_players(self, game_id: str) -> List[Player]:
@@ -306,11 +390,14 @@ class Database:
             ]
 
     async def update_player_field(self, game_id: str, user_id: int, field: str, value: Any):
-        async with self.pool.acquire() as conn:
-            await conn.execute(
-                f"UPDATE players SET {field} = $1 WHERE game_id = $2 AND user_id = $3",
-                value, game_id, user_id
-            )
+        async def _update_player_field():
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    f"UPDATE players SET {field} = $1 WHERE game_id = $2 AND user_id = $3",
+                    value, game_id, user_id
+                )
+        
+        await self._execute_with_retry(_update_player_field)
 
     async def get_player_field(self, game_id: str, user_id: int, field: str) -> Any:
         """Get a specific field value for a player"""
