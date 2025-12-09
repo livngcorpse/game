@@ -156,6 +156,9 @@ class PhaseManager:
             "round_number": self.game_state.get_round_number(game_id)
         }
         
+        # Apply AFK penalties for players who didn't perform night actions
+        await self._apply_afk_penalties(game_id)
+        
         # 1. Process sheriff shots first (can prevent impostor kills)
         sheriff_results = await self._process_sheriff_actions(game_id)
         results["deaths"].extend(sheriff_results.get("deaths", []))
@@ -173,6 +176,56 @@ class PhaseManager:
         results["task_success"] = task_results.get("success", False)
         
         return results
+
+    async def _apply_afk_penalties(self, game_id: str):
+        """Apply XP penalties to players who were AFK during night phase"""
+        # Get all alive players
+        players = await db.get_alive_players(game_id)
+        
+        # Check each player's actions
+        for player in players:
+            # Check if player had a required night action but didn't perform it
+            action_performed = False
+            
+            # Check if player was assigned a task
+            if player.role == Role.CREWMATE and self.task_engine.get_player_task(game_id, player.user_id):
+                if player.completed_task:
+                    action_performed = True
+            
+            # Check if player is impostor
+            elif player.role == Role.IMPOSTOR:
+                if self.night_actions.get(game_id, {}).get(player.user_id):
+                    action_performed = True
+            
+            # Check if player is detective
+            elif player.role == Role.DETECTIVE:
+                round_number = self.game_state.get_round_number(game_id)
+                can_investigate = False
+                if await db.get_players_by_role(game_id, Role.DETECTIVE) == 1:
+                    can_investigate = round_number % 2 == 0
+                else:
+                    can_investigate = True
+                
+                if can_investigate and self.night_actions.get(game_id, {}).get(player.user_id):
+                    action_performed = True
+            
+            # Check if player is sheriff
+            elif player.role == Role.SHERIFF:
+                if self.night_actions.get(game_id, {}).get(player.user_id):
+                    action_performed = True
+            
+            # Apply AFK penalty if no action was performed when required
+            if not action_performed and (
+                player.role == Role.CREWMATE and self.task_engine.get_player_task(game_id, player.user_id) or
+                player.role == Role.IMPOSTOR or
+                player.role == Role.DETECTIVE and (
+                    await db.get_players_by_role(game_id, Role.DETECTIVE) == 1 and 
+                    self.game_state.get_round_number(game_id) % 2 == 0 or
+                    await db.get_players_by_role(game_id, Role.DETECTIVE) > 1
+                ) or
+                player.role == Role.SHERIFF
+            ):
+                await self.xp_system.deduct_xp(player.user_id, "afk")
 
     async def _process_impostor_actions(self, game_id: str) -> Dict[str, Any]:
         """Process impostor kills - voting or solo"""
@@ -419,6 +472,9 @@ class PhaseManager:
     async def resolve_voting(self, game_id: str, group_id: int):
         """Enhanced voting resolution with detailed results"""
         try:
+            # Apply AFK penalties for players who didn't vote
+            await self._apply_voting_afk_penalties(game_id)
+            
             vote_result = await self.game_state.resolve_votes(game_id)
             
             # Announce voting results in group
@@ -459,6 +515,18 @@ class PhaseManager:
                 await self.game_state.end_game(game_id)
             except Exception as end_game_error:
                 await self.game_logger.log_error(f"Error ending game after voting failure: {end_game_error}", {"game_id": game_id})
+
+    async def _apply_voting_afk_penalties(self, game_id: str):
+        """Apply XP penalties to players who were AFK during voting phase"""
+        # Get all alive players
+        players = await db.get_alive_players(game_id)
+        
+        # Check each player's voting status
+        for player in players:
+            # Check if player has voted
+            if not player.voted:
+                # Apply AFK penalty
+                await self.xp_system.deduct_xp(player.user_id, "afk")
 
     async def _send_role_assignments(self, game_id: str):
         """Send role assignments via DM"""

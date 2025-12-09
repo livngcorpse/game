@@ -49,6 +49,7 @@ async def _handle_prefixed_commands(update, context):
             context.args = text.split()[1:] if len(text.split()) > 1 else []
             
             command_map = {
+                "start": commands.start_command,
                 "startgame": commands.startgame_command,
                 "join": commands.join_command,
                 "begin": commands.begin_command,
