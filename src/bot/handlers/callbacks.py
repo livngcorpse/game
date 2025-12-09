@@ -343,7 +343,7 @@ async def team_chat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_text = message.text
     
     # Get the current game for this user
-    game = await bot_instance.game_state.get_game_by_group(message.chat.id)
+    game = await bot_instance.game_state.get_game_by_user(user_id)
     if not game:
         return
     

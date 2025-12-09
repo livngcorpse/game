@@ -148,6 +148,21 @@ class GameState:
     def get_round_number(self, game_id: str) -> int:
         return self.round_numbers.get(game_id, 1)
 
+    async def get_game_by_user(self, user_id: int) -> Optional[Game]:
+        """Find the active game that a user is participating in"""
+        # Check all active games
+        for group_id, game_id in self.active_games.items():
+            # Check if user is in lobby
+            if game_id in self.lobby_players and user_id in self.lobby_players[game_id]:
+                return await self.get_game_by_group(group_id)
+            
+            # Check if user is a player in the game
+            player = await db.get_player(game_id, user_id)
+            if player:
+                return await db.get_game_by_id(game_id)
+        
+        return None
+
     async def reset_failed_rounds(self, game_id: str):
         """Reset failed task rounds for a game"""
         # Update the game settings to reset failed rounds

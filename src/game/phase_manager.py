@@ -83,7 +83,10 @@ class PhaseManager:
                 pass
         
         # Send group message
-        await self.bot.send_message(group_id, "❌ Game cancelled - need at least 4 players.")
+        try:
+            await self.bot.send_message(group_id, "❌ Game cancelled - need at least 4 players.")
+        except Exception as e:
+            await self.game_logger.log_error(f"Can't send cancellation message to group {group_id}", {"error": str(e)})
         
         await self.game_state.end_game(game_id)
         
@@ -105,11 +108,14 @@ class PhaseManager:
         assigned_task_players = await self.task_engine.assign_tasks(game_id)
         
         # Send night phase message to group
-        await self.bot.send_message(
-            group_id, 
-            Messages.get_night_phase_message(),
-            reply_markup=Keyboards.get_dm_redirect_keyboard()
-        )
+        try:
+            await self.bot.send_message(
+                group_id, 
+                Messages.get_night_phase_message(),
+                reply_markup=Keyboards.get_dm_redirect_keyboard()
+            )
+        except Exception as e:
+            await self.game_logger.log_error(f"Can't send night phase message to group {group_id}", {"error": str(e)})
         
         # Send role-specific action prompts via DM
         await self._send_night_action_prompts(game_id)
@@ -436,7 +442,10 @@ class PhaseManager:
         
         # Send day phase summary to group
         day_message = Messages.get_day_phase_message(alive_player_ids, night_summary)
-        await self.bot.send_message(group_id, day_message)
+        try:
+            await self.bot.send_message(group_id, day_message)
+        except Exception as e:
+            await self.game_logger.log_error(f"Can't send day phase message to group {group_id}", {"error": str(e)})
         
         # Send detective findings privately
         if night_summary.get("investigations"):
@@ -476,7 +485,10 @@ class PhaseManager:
         await self.game_state.transition_phase(game_id, GamePhase.VOTING)
         
         # Send voting message to group
-        await self.bot.send_message(group_id, Messages.get_voting_phase_message())
+        try:
+            await self.bot.send_message(group_id, Messages.get_voting_phase_message())
+        except Exception as e:
+            await self.game_logger.log_error(f"Can't send voting phase message to group {group_id}", {"error": str(e)})
         
         # Send voting keyboards to all alive players via DM
         alive_players = await db.get_alive_players(game_id)
@@ -515,7 +527,10 @@ class PhaseManager:
                 player = await db.get_player(game_id, ejected_player)
                 if player:
                     result_message = Messages.get_voting_result_message(ejected_player, player.role.value)
-                    await self.bot.send_message(group_id, result_message)
+                    try:
+                        await self.bot.send_message(group_id, result_message)
+                    except Exception as e:
+                        await self.game_logger.log_error(f"Can't send voting result to group {group_id}", {"error": str(e)})
                     
                     # Award XP to correct voters
                     voters = await db.get_voters_for_target(game_id, ejected_player)
@@ -523,12 +538,18 @@ class PhaseManager:
                         await self.xp_system.award_xp(voter_id, "correct_vote")
             else:
                 no_ejection_message = Messages.get_voting_result_message(None, "")
-                await self.bot.send_message(group_id, no_ejection_message)
+                try:
+                    await self.bot.send_message(group_id, no_ejection_message)
+                except Exception as e:
+                    await self.game_logger.log_error(f"Can't send no ejection message to group {group_id}", {"error": str(e)})
             
             # Show vote breakdown
             if vote_result["votes"]:
                 vote_breakdown = Messages.get_vote_breakdown_message(vote_result["votes"])
-                await self.bot.send_message(group_id, vote_breakdown)
+                try:
+                    await self.bot.send_message(group_id, vote_breakdown)
+                except Exception as e:
+                    await self.game_logger.log_error(f"Can't send vote breakdown to group {group_id}", {"error": str(e)})
             
             win_condition = await WinConditions.check_win_condition(game_id)
             if win_condition:
@@ -735,7 +756,10 @@ class PhaseManager:
         
         # Send victory message
         victory_message = Messages.get_game_end_message(win_condition, winners)
-        await self.bot.send_message(group_id, victory_message)
+        try:
+            await self.bot.send_message(group_id, victory_message)
+        except Exception as e:
+            await self.game_logger.log_error(f"Can't send victory message to group {group_id}", {"error": str(e)})
         
         await self.game_state.end_game(game_id)
         
@@ -756,7 +780,10 @@ class PhaseManager:
             await self.xp_system.deduct_xp(player.user_id, "ship_explodes")
         
         explosion_message = Messages.get_game_end_message("explosion", [])
-        await self.bot.send_message(group_id, explosion_message)
+        try:
+            await self.bot.send_message(group_id, explosion_message)
+        except Exception as e:
+            await self.game_logger.log_error(f"Can't send explosion message to group {group_id}", {"error": str(e)})
         
         await self.game_state.end_game(game_id)
         

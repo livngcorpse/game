@@ -5,6 +5,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "your_bot_username")  # Default fallback
 
 # Handle BOT_OWNER_ID with proper error handling
 try:

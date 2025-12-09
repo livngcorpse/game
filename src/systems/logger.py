@@ -49,30 +49,82 @@ class GameLogger:
     async def log_phase_transition(self, game_id: str, from_phase: str, to_phase: str):
         logger.info("Phase shift! Everyone's paranoia level just increased 📈", 
                    game_id=game_id, from_phase=from_phase, to_phase=to_phase)
+        
+        if GAME_LOG_CHANNEL_ID:
+            await self.bot.send_message(
+                GAME_LOG_CHANNEL_ID,
+                f"🔄 Phase transition\nGame: {game_id}\nFrom: {from_phase}\nTo: {to_phase}"
+            )
 
     async def log_kill(self, game_id: str, killer_role: str, victim_id: int, method: str):
         logger.info("RIP another innocent soul (or maybe not so innocent) 💀", 
                    game_id=game_id, killer_role=killer_role, victim_id=victim_id, method=method)
+        
+        if GAME_LOG_CHANNEL_ID:
+            await self.bot.send_message(
+                GAME_LOG_CHANNEL_ID,
+                f"💀 Player killed\nGame: {game_id}\nKiller: {killer_role}\nVictim: {victim_id}\nMethod: {method}"
+            )
 
     async def log_vote(self, game_id: str, voter_id: int, target_id: int):
         logger.info("Democracy in action! Someone's about to get yeeted 🗳️", 
                    game_id=game_id, voter_id=voter_id, target_id=target_id)
+        
+        if GAME_LOG_CHANNEL_ID:
+            await self.bot.send_message(
+                GAME_LOG_CHANNEL_ID,
+                f"🗳️ Vote cast\nGame: {game_id}\nVoter: {voter_id}\nTarget: {target_id}"
+            )
 
     async def log_task_result(self, game_id: str, success: bool, assigned_players: list):
         status = "Crewmates actually did something useful" if success else "Tasks failed, ship go boom soon 💥"
         logger.info(status, game_id=game_id, success=success, assigned_players=assigned_players)
+        
+        if GAME_LOG_CHANNEL_ID:
+            await self.bot.send_message(
+                GAME_LOG_CHANNEL_ID,
+                f"🔧 Task result\nGame: {game_id}\nSuccess: {success}\nAssigned: {len(assigned_players)}"
+            )
 
     async def log_sheriff_action(self, game_id: str, sheriff_id: int, target_id: int, target_role: str, success: bool):
         result = "Sheriff just rage-clicked an innocent. RIP trust issues 💀🔫" if not success else "Sheriff actually hit an impostor! Rare W 🎯"
         logger.info(result, game_id=game_id, sheriff_id=sheriff_id, target_id=target_id, target_role=target_role, success=success)
+        
+        if GAME_LOG_CHANNEL_ID:
+            action = "Successful shot" if success else "Friendly fire"
+            await self.bot.send_message(
+                GAME_LOG_CHANNEL_ID,
+                f"🔫 Sheriff action\nGame: {game_id}\nSheriff: {sheriff_id}\nTarget: {target_id}\nRole: {target_role}\nResult: {action}"
+            )
 
     async def log_detective_investigation(self, game_id: str, detective_id: int, target_id: int, result: str):
         logger.info("Detective playing 4D chess while everyone else playing checkers 🕵️", 
                    game_id=game_id, detective_id=detective_id, target_id=target_id, result=result)
+        
+        if GAME_LOG_CHANNEL_ID:
+            await self.bot.send_message(
+                GAME_LOG_CHANNEL_ID,
+                f"🕵️ Detective investigation\nGame: {game_id}\nDetective: {detective_id}\nTarget: {target_id}\nResult: {result}"
+            )
 
     async def log_engineer_action(self, game_id: str, engineer_id: int, action: str):
         logger.info("Engineer either saved everyone or just delayed the inevitable 🔧", 
                    game_id=game_id, engineer_id=engineer_id, action=action)
+        
+        if GAME_LOG_CHANNEL_ID:
+            await self.bot.send_message(
+                GAME_LOG_CHANNEL_ID,
+                f"⚙️ Engineer action\nGame: {game_id}\nEngineer: {engineer_id}\nAction: {action}"
+            )
+
+    async def log_error(self, error: str, context: dict = None):
+        logger.error("Something went horribly wrong 💩", error=error, context=context or {})
+        
+        if GAME_LOG_CHANNEL_ID:
+            await self.bot.send_message(
+                GAME_LOG_CHANNEL_ID,
+                f"❌ Error occurred\nError: {error}\nContext: {context or 'None'}"
+            )
 
 class BotLogger:
     def __init__(self, bot: Bot):
@@ -107,3 +159,9 @@ class BotLogger:
 
     async def log_error(self, error: str, context: dict = None):
         logger.error("Something went horribly wrong 💩", error=error, context=context or {})
+        
+        if BOT_LOG_CHANNEL_ID:
+            await self.bot.send_message(
+                BOT_LOG_CHANNEL_ID,
+                f"❌ Bot error occurred\nError: {error}\nContext: {context or 'None'}"
+            )
